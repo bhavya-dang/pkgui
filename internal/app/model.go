@@ -12,8 +12,12 @@ import (
 type Model struct {
 	cursor   int
 	packages []string
-	loading  bool
-	err      error
+
+	loading bool
+	err     error
+
+	width  int
+	height int
 }
 
 type brewListMsg []string
@@ -43,6 +47,10 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
 
 	case brewListMsg:
 		m.packages = []string(msg)
@@ -88,10 +96,27 @@ func (m Model) View() string {
 	sep := lipgloss.NewStyle().
 		Foreground(violet).
 		Padding(0, 1).
-		Render(strings.Repeat("─", 30))
+		Render(strings.Repeat("─", m.width-8))
 
 	var list string
-	for i, pkg := range m.packages {
+
+	visibleHeight := m.height - 8
+
+	start := 0
+
+	if m.cursor >= visibleHeight {
+		start = m.cursor - visibleHeight + 1
+	}
+
+	end := start + visibleHeight
+
+	if end > len(m.packages) {
+		end = len(m.packages)
+	}
+
+	for i := start; i < end; i++ {
+		pkg := m.packages[i]
+
 		if i == m.cursor {
 			list += SelectedItemStyle.Render("▸ "+pkg) + "\n"
 		} else {
