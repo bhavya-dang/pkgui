@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/bhavyadang/brew-tui/internal/app"
+	"github.com/bhavyadang/pkgui/internal/app"
 )
 
 func main() {

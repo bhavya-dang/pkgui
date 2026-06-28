@@ -1,1 +1,1 @@
-# brew-tui
+# pkgui

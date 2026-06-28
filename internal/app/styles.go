@@ -23,6 +23,8 @@ var (
 				Foreground(lipgloss.Color("#ffffff")).
 				Padding(0, 1)
 
+	ResultStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(violet))
+
 	FooterStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6b7280"))
 
@@ -30,9 +32,40 @@ var (
 			Foreground(violet).
 			Italic(true)
 
+	LoadingCountStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#f472b6"))
+
 	ErrorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#ef4444")).
 			Bold(true)
+
+	DetailTitleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(violet).
+				Padding(0, 1)
+
+	DetailLabelStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(violet).
+				Padding(0, 1)
+
+	DetailValueStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#e0e0e0")).
+				Padding(0, 1)
+
+	DetailSectionStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(violetDim).
+				Padding(0, 1)
+
+	DividerStyle = lipgloss.NewStyle().
+			Foreground(violet)
+
+	SearchBarStyle = lipgloss.NewStyle().
+			Foreground(violet).
+			Bold(true).
+			Padding(0, 1)
 
 	docStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).

@@ -1,4 +1,4 @@
-module github.com/bhavyadang/brew-tui
+module github.com/bhavyadang/pkgui
 
 go 1.25.5
 
