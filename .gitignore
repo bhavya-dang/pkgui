@@ -32,6 +32,7 @@ go.work.sum
 # .vscode/
 
 tmp/
+.DS_Store
 
 # Build output
 build/

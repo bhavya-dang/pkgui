@@ -1,15 +1,26 @@
 # pkgui
 
-A TUI to manage multiple package managers and packages installed by them.
+A terminal UI for managing packages across multiple package managers.
 
 > Written in Go using [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 
 ## Features
 
-- List installed Homebrew formulae
+- List installed packages
 - Fuzzy search installed packages (`/` to search)
-- View formula details: version, description, homepage, license, dependencies
+- View package details: version, description, homepage, license, dependencies
 - Scrollable package list with keyboard navigation
+
+## Roadmap
+
+- Homebrew cask support
+- npm / yarn / pnpm
+- pip
+- install/remove/upgrade existing packages
+
+## Supported Package Managers
+
+- **Homebrew** (formulae) — more coming soon
 
 ## Prerequisites
 
@@ -17,6 +28,12 @@ A TUI to manage multiple package managers and packages installed by them.
 - Go 1.25+ (if building from source)
 
 ## Installation
+
+### Using Homebrew
+
+```bash
+brew install bhavya-dang/pkgui/pkgui
+```
 
 ### Using Go
 
@@ -55,13 +72,13 @@ pkgui
 
 ### Keybindings
 
-| Key | Action |
-|-----|--------|
-| `↑` / `↓` | Navigate package list |
-| `/` | Start search (type to filter) |
-| `Esc` | Exit search |
-| `Enter` | Confirm search |
-| `q` / `Ctrl+C` | Quit |
+| Key            | Action                        |
+| -------------- | ----------------------------- |
+| `↑` / `↓`      | Navigate package list         |
+| `/`            | Start search (type to filter) |
+| `Esc`          | Exit search                   |
+| `Enter`        | Confirm search                |
+| `q` / `Ctrl+C` | Quit                          |
 
 ## Support
 
