@@ -34,6 +34,9 @@ type Model struct {
 	searchQuery  string
 
 	info *FormulaData
+
+	installPaths      map[string]string
+	installedVersions map[string]string
 }
 
 type FormulaData struct {
@@ -48,7 +51,12 @@ type FormulaData struct {
 	BuildDependencies []string `json:"build_dependencies"`
 }
 
-type brewListMsg []string
+type brewListMsg struct {
+	names             []string
+	paths             map[string]string
+	installedVersions map[string]string
+}
+
 type brewErrMsg error
 type brewFormulaeMsg map[string]FormulaData
 type brewFormulaeErrMsg error
@@ -58,13 +66,54 @@ type formulaeProgressMsg struct {
 
 func fetchBrewList() tea.Cmd {
 	return func() tea.Msg {
-		cmd := exec.Command("brew", "list", "--formula")
+		cmd := exec.Command("brew", "list", "--formula", "--versions")
 		out, err := cmd.Output()
 		if err != nil {
 			return brewErrMsg(err)
 		}
-		return brewListMsg(strings.Fields(string(out)))
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+
+		var names []string
+		paths := make(map[string]string)
+		installedVersions := make(map[string]string)
+
+		cellarOut, cerr := exec.Command("brew", "--cellar").Output()
+		cellarPrefix := ""
+		if cerr == nil {
+			cellarPrefix = strings.TrimSpace(string(cellarOut))
+		}
+
+		for _, line := range lines {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				name, ver := parts[0], parts[1]
+				names = append(names, name)
+				installedVersions[name] = ver
+				paths[name] = cellarPrefix + "/" + name + "/" + ver
+			}
+		}
+		return brewListMsg{names, paths, installedVersions}
 	}
+}
+
+func renderSection(width int, title string, lines ...string) string {
+	inner := width - 2
+
+	// Top: "┌─ Title ──────────────────┐"
+	top := "┌─ " + title + " " +
+		strings.Repeat("─", max(0, width-5-len(title))) + "┐"
+
+	// Content rows: "│  ...  │"
+	var body []string
+	for _, line := range lines {
+		padded := lipgloss.NewStyle().Width(inner).Render(line)
+		body = append(body, "│"+padded+"│")
+	}
+
+	// Bottom: "└──────────────────────────┘"
+	bottom := "└" + strings.Repeat("─", inner) + "┘"
+
+	return strings.Join(append([]string{top}, append(body, bottom)...), "\n")
 }
 
 func startDownload(ch chan<- tea.Msg) {
@@ -132,6 +181,9 @@ func (m Model) Init() tea.Cmd {
 }
 
 func fuzzyMatch(s, query string) bool {
+	// s = the name of the package
+	// q/query = the search query being typed
+
 	s = strings.ToLower(s)
 	q := strings.ToLower(query)
 	qi := 0
@@ -190,8 +242,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.recvDownload()
 
 	case brewListMsg:
-		m.packages = []string(msg)
+		m.packages = msg.names
 		m.displayPackages = m.packages
+		m.installPaths = msg.paths
+		m.installedVersions = msg.installedVersions
 		if m.formulaeReady {
 			m.loading = false
 			m = m.updateInfo()
@@ -342,7 +396,7 @@ func (m Model) renderLeftPanel(width int) string {
 	title := TitleStyle.Render(titleText)
 
 	sep := lipgloss.NewStyle().
-		Foreground(violet).
+		Foreground(teal).
 		Padding(0, 1).
 		Render(strings.Repeat("─", max(0, width-4)))
 
@@ -386,16 +440,16 @@ func (m Model) renderRightPanel(width int) string {
 	pkgName := m.displayPackages[m.cursor]
 	title := lipgloss.NewStyle().
 		Width(width).
-		Render(DetailTitleStyle.Render("▸ " + pkgName))
+		Render(DetailTitleStyle.Render(pkgName))
 
-	sep := lipgloss.NewStyle().
-		Foreground(violet).
-		Padding(0, 1).
-		Render(strings.Repeat("─", max(0, width-4)))
+	// sep := lipgloss.NewStyle().
+	// 	Foreground(teal).
+	// 	Padding(0, 1).
+	// 	Render(strings.Repeat("─", max(0, width-4)))
 
 	var contentLines []string
 	contentLines = append(contentLines, title)
-	contentLines = append(contentLines, sep)
+	// contentLines = append(contentLines, sep)
 
 	if m.apiErr != nil {
 		contentLines = append(contentLines,
@@ -403,44 +457,105 @@ func (m Model) renderRightPanel(width int) string {
 	} else if m.info != nil {
 		info := m.info
 
-		contentLines = append(contentLines,
-			DetailLabelStyle.Render("Version:")+"  "+DetailValueStyle.Render(info.Versions.Stable))
-		contentLines = append(contentLines, "")
+		// contentLines = append(contentLines,
+		// 	DetailLabelStyle.Render("Version:")+"  "+DetailValueStyle.Render(info.Versions.Stable))
+		// contentLines = append(contentLines, "")
 
 		if info.Desc != "" {
 			contentLines = append(contentLines,
-				DetailLabelStyle.Render("Description:"))
-			contentLines = append(contentLines,
-				DetailValueStyle.Render("  "+info.Desc))
+				DetailValueStyle.Render("▸ "+info.Desc))
 			contentLines = append(contentLines, "")
 		}
 
-		if info.Homepage != "" {
-			contentLines = append(contentLines,
-				DetailLabelStyle.Render("Homepage:")+"  "+DetailValueStyle.Render(info.Homepage))
-			contentLines = append(contentLines, "")
-		}
+		contentLines = append(contentLines, "")
+		contentLines = append(contentLines,
+			lipgloss.NewStyle().Foreground(teal).Padding(0, 1).
+				Render(strings.Repeat("─", max(0, width-4))))
+		contentLines = append(contentLines, "")
 
+		var pkgLines []string
+		if ver, ok := m.installedVersions[pkgName]; ok {
+			pkgLines = append(pkgLines,
+				DetailLabelStyle.Render("Installed:")+"  "+DetailValueStyle.Render(ver))
+		}
+		if info.Versions.Stable != "" {
+			pkgLines = append(pkgLines,
+				DetailLabelStyle.Render("Latest:")+"    "+DetailValueStyle.Render(info.Versions.Stable))
+		}
+		if path, ok := m.installPaths[pkgName]; ok && path != "" {
+			pkgLines = append(pkgLines,
+				DetailLabelStyle.Render("Path:")+"       "+DetailValueStyle.Render(path))
+		}
+		contentLines = append(contentLines, renderSection(width, "Package", pkgLines...))
+
+		// if info.Versions.Stable != "" {
+		// 	contentLines = append(contentLines, DetailLabelStyle.Render("Latest Version:")+" "+DetailValueStyle.Render(info.Versions.Stable))
+		// }
+
+		// if ver, ok := m.installedVersions[pkgName]; ok {
+		// 	contentLines = append(contentLines, DetailLabelStyle.Render("Installed Version:")+" "+DetailValueStyle.Render(ver))
+		// }
+
+		// contentLines = append(contentLines, "")
+
+		// if info.Homepage != "" {
+		// 	contentLines = append(contentLines,
+		// 		DetailLabelStyle.Render("Homepage:")+"  "+LinkStyle.Render(info.Homepage))
+		// 	contentLines = append(contentLines, "")
+		// }
+
+		// if info.License != "" {
+		// 	contentLines = append(contentLines,
+		// 		DetailLabelStyle.Render("License:")+"  "+DetailValueStyle.Render(info.License))
+		// 	contentLines = append(contentLines, "")
+		// }
+
+		var metaLines []string
 		if info.License != "" {
-			contentLines = append(contentLines,
+			metaLines = append(metaLines,
 				DetailLabelStyle.Render("License:")+"  "+DetailValueStyle.Render(info.License))
-			contentLines = append(contentLines, "")
 		}
+		if info.Homepage != "" {
+			metaLines = append(metaLines,
+				DetailLabelStyle.Render("Homepage:")+" "+DetailValueStyle.Render(info.Homepage))
+		}
+		if len(metaLines) > 0 {
+			contentLines = append(contentLines, renderSection(width, "Metadata", metaLines...))
+		}
+
+		// if len(info.Dependencies) > 0 {
+		// 	contentLines = append(contentLines,
+		// 		DetailLabelStyle.Render("Dependencies"))
+		// 	contentLines = append(contentLines,
+		// 		DetailValueStyle.Render("  "+strings.Join(info.Dependencies, ", ")))
+		// 	contentLines = append(contentLines, "")
+		// }
+
+		// if len(info.BuildDependencies) > 0 {
+		// 	contentLines = append(contentLines,
+		// 		DetailLabelStyle.Render("Build Dependencies"))
+		// 	contentLines = append(contentLines,
+		// 		DetailValueStyle.Render("  "+strings.Join(info.BuildDependencies, ", ")))
+		// 	contentLines = append(contentLines, "")
+		// }
 
 		if len(info.Dependencies) > 0 {
 			contentLines = append(contentLines,
-				DetailSectionStyle.Render("Dependencies"))
-			contentLines = append(contentLines,
-				DetailValueStyle.Render("  "+strings.Join(info.Dependencies, ", ")))
-			contentLines = append(contentLines, "")
+				renderSection(width, "Dependencies",
+					DetailValueStyle.Render(strings.Join(info.Dependencies, ", "))))
 		}
 
 		if len(info.BuildDependencies) > 0 {
 			contentLines = append(contentLines,
-				DetailSectionStyle.Render("Build Dependencies"))
-			contentLines = append(contentLines,
-				DetailValueStyle.Render("  "+strings.Join(info.BuildDependencies, ", ")))
+				renderSection(width, "Build Dependencies",
+					DetailValueStyle.Render(strings.Join(info.BuildDependencies, ", "))))
 		}
+
+		// if path, ok := m.installPaths[pkgName]; ok && path != "" {
+		// 	contentLines = append(contentLines,
+		// 		DetailLabelStyle.Render("Path:")+" "+DetailValueStyle.Render(path))
+		// }
+
 	} else {
 		contentLines = append(contentLines,
 			DetailValueStyle.Render("  No formula data available"))
@@ -470,7 +585,7 @@ func (m Model) listViewFallback() string {
 	title := TitleStyle.Render(fmt.Sprintf("pkgui  (%d)", len(m.packages)))
 
 	sep := lipgloss.NewStyle().
-		Foreground(violet).
+		Foreground(teal).
 		Padding(0, 1).
 		Render(strings.Repeat("─", m.width-8))
 
