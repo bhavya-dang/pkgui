@@ -3,38 +3,38 @@ package app
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	violet     = lipgloss.Color("#a78bfa")
-	violetDark = lipgloss.Color("#7c3aed")
-	violetDim  = lipgloss.Color("#8b5cf6")
+	teal     = lipgloss.Color("#5bc0be")
+	tealDark = lipgloss.Color("#3b9b99")
+	amber    = lipgloss.Color("#e4b95b")
 )
 
 var (
 	TitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(violet).
+			Foreground(teal).
 			Padding(0, 1)
 
 	ItemStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#e0e0e0")).
+			Foreground(lipgloss.Color("#c0d4e4")).
 			Padding(0, 1)
 
 	SelectedItemStyle = lipgloss.NewStyle().
-				Background(violetDark).
+				Background(tealDark).
 				Foreground(lipgloss.Color("#ffffff")).
 				Padding(0, 1)
 
-	ResultStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(violet))
+	ResultStyle = lipgloss.NewStyle().Foreground(teal)
 
 	FooterStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6b7280"))
+			Foreground(lipgloss.Color("#60788a"))
 
 	LoadingStyle = lipgloss.NewStyle().
-			Foreground(violet).
+			Foreground(teal).
 			Italic(true)
 
 	LoadingCountStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#f472b6"))
+				Foreground(amber)
 
 	ErrorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#ef4444")).
@@ -42,33 +42,40 @@ var (
 
 	DetailTitleStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(violet).
+				Foreground(amber).
 				Padding(0, 1)
 
 	DetailLabelStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(violet).
+				Foreground(teal).
 				Padding(0, 1)
 
 	DetailValueStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#e0e0e0")).
+				Foreground(lipgloss.Color("#c0d4e4")).
 				Padding(0, 1)
 
 	DetailSectionStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(violetDim).
+				Foreground(amber).
 				Padding(0, 1)
 
 	DividerStyle = lipgloss.NewStyle().
-			Foreground(violet)
+			Foreground(teal)
 
 	SearchBarStyle = lipgloss.NewStyle().
-			Foreground(violet).
+			Foreground(teal).
 			Bold(true).
 			Padding(0, 1)
 
+	LinkStyle = lipgloss.NewStyle().
+			Foreground(amber).Underline(true)
+
+	SectionContentStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#e0e0e0")).
+				Padding(0, 1)
+
 	docStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(violet).
+			BorderForeground(teal).
 			Padding(1, 2)
 )
