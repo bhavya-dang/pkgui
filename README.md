@@ -4,23 +4,27 @@ A terminal UI for managing packages across multiple package managers.
 
 > Written in Go using [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 
+<br/>
+
+![Screenshot 1](./preview/1.png)
+
 ## Features
 
 - List installed packages
 - Fuzzy search installed packages (`/` to search)
-- View package details: version, description, homepage, license, dependencies
+- View package details: version (installed/latest), description, homepage, license, dependencies, installation path
 - Scrollable package list with keyboard navigation
 
 ## Roadmap
 
-- Homebrew cask support
+- Cask support
 - npm / yarn / pnpm
 - pip
-- install/remove/upgrade existing packages
+- upgrade/remove packages
 
-## Supported Package Managers
+## Currently Supported PMs
 
-- **Homebrew** (formulae) — more coming soon
+- **Homebrew** (formulae)
 
 ## Prerequisites
 
@@ -84,10 +88,6 @@ pkgui
 
 - Homebrew
   - formulae (with detail view from the Homebrew API)
-
-## Preview
-
-![Screenshot 1](./preview/1.png)
 
 ## License
 

@@ -46,26 +46,25 @@ var (
 				Padding(0, 1)
 
 	DetailLabelStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(teal).
-				Padding(0, 1)
+			Bold(true).
+			Foreground(teal)
 
 	DetailValueStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#c0d4e4")).
-				Padding(0, 1)
+			Foreground(lipgloss.Color("#c0d4e4"))
 
 	DetailSectionStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(amber).
 				Padding(0, 1)
 
-	DividerStyle = lipgloss.NewStyle().
-			Foreground(teal)
-
 	SearchBarStyle = lipgloss.NewStyle().
 			Foreground(teal).
 			Bold(true).
 			Padding(0, 1)
+
+	SearchPlaceholderStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#60788a")).
+				Italic(true)
 
 	LinkStyle = lipgloss.NewStyle().
 			Foreground(amber).Underline(true)
@@ -75,7 +74,5 @@ var (
 				Padding(0, 1)
 
 	docStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(teal).
-			Padding(1, 2)
+			Padding(1, 3, 1, 3)
 )
