@@ -6,7 +6,7 @@ A terminal UI for managing packages across multiple package managers.
 
 <br/>
 
-![Screenshot 1](./preview/1.png)
+![Screenshot 1](./preview/2.png)
 
 ## Features
 
