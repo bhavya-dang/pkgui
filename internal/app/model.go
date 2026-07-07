@@ -13,32 +13,33 @@ import (
 )
 
 type Model struct {
-	cursor          int      // package navigation
-	packages        []string // list of all packages
-	displayPackages []string // list of displayed packages
+	cursor          int
+	packages        []string // all installed formulae
+	displayPackages []string // filtered subset for display
 
-	loading bool // to track the model state pre and post-download
+	loading bool
 	err     error
 
-	width  int // terminal width
-	height int // terminal height
+	width  int
+	height int
 
-	formulaeMap   map[string]FormulaData // set of formula names mapped to their data json values
-	formulaeReady bool                   // to track download of formulae
-	apiErr        error                  // to track API download failure
+	formulaeMap   map[string]FormulaData
+	formulaeReady bool
+	apiErr        error
 
-	downloadCh    chan tea.Msg // send-only channel to send download progress
-	formulaeCount int          // to display formulae count on the UI
+	downloadCh    chan tea.Msg
+	formulaeCount int
 
 	searchActive bool
 	searchQuery  string
 
-	info *FormulaData // pointer to the formulae data in json
+	info *FormulaData
 
-	installPaths      map[string]string // paths of installed packages on system
-	installedVersions map[string]string // versions of installed packages on system
+	installPaths      map[string]string
+	installedVersions map[string]string
 }
 
+// Formula schema from the Homebrew JSON API.
 type FormulaData struct {
 	Name     string `json:"name"`
 	Desc     string `json:"desc"`
@@ -64,6 +65,7 @@ type formulaeProgressMsg struct {
 	Count int
 }
 
+// Runs the command and parses output to get formulae list, installed versions, and paths
 func fetchBrewList() tea.Cmd {
 	return func() tea.Msg {
 		cmd := exec.Command("brew", "list", "--formula", "--versions")
@@ -100,11 +102,11 @@ func fetchBrewList() tea.Cmd {
 	}
 }
 
+// Draws a bordered box with a title for detail sections
 func renderSection(maxWidth int, title string, lines ...string) string {
 	amberStyle := lipgloss.NewStyle().Bold(true).Foreground(amber)
 	border := lipgloss.NewStyle().Foreground(teal)
 
-	// Find natural width from content
 	maxContent := 0
 	for _, line := range lines {
 		w := lipgloss.Width(line)
@@ -112,7 +114,6 @@ func renderSection(maxWidth int, title string, lines ...string) string {
 			maxContent = w
 		}
 	}
-	// some math
 	boxWidth := max(maxContent+4, lipgloss.Width(title)+6)
 	boxWidth = min(boxWidth, maxWidth)
 
@@ -133,6 +134,7 @@ func renderSection(maxWidth int, title string, lines ...string) string {
 	return strings.Join(append([]string{top}, append(body, bottom)...), "\n")
 }
 
+// Wraps content in a bordered box for the left/right panels.
 func renderPaneBox(width int, title string, content string) string {
 	amberStyle := lipgloss.NewStyle().Bold(true).Foreground(amber)
 	border := lipgloss.NewStyle().Foreground(teal)
@@ -154,6 +156,7 @@ func renderPaneBox(width int, title string, content string) string {
 	return strings.Join(append([]string{top}, append(body, bottom)...), "\n")
 }
 
+// Streams the formulae JSON from the Homebrew API, sending progress updates.
 func startDownload(ch chan<- tea.Msg) {
 	go func() {
 		client := &http.Client{Timeout: 30 * time.Second}
@@ -162,7 +165,7 @@ func startDownload(ch chan<- tea.Msg) {
 			ch <- brewFormulaeErrMsg(err)
 			return
 		}
-		defer resp.Body.Close()
+		defer resp.Body.Close() // closes the http response after the rest of the function is done
 
 		dec := json.NewDecoder(resp.Body)
 
@@ -193,6 +196,7 @@ func startDownload(ch chan<- tea.Msg) {
 	}()
 }
 
+// Receives the next message from the download channel.
 func (m Model) recvDownload() tea.Cmd {
 	if m.downloadCh == nil {
 		return nil
@@ -206,6 +210,7 @@ func (m Model) recvDownload() tea.Cmd {
 	}
 }
 
+// Returns a model with loading state and a buffered download channel.
 func New() Model {
 	return Model{
 		loading:    true,
@@ -213,11 +218,13 @@ func New() Model {
 	}
 }
 
+// Starts fetching the brew list and formulae data concurrently.
 func (m Model) Init() tea.Cmd {
 	startDownload(m.downloadCh)
 	return tea.Batch(fetchBrewList(), m.recvDownload())
 }
 
+// Sequential character-level fuzzy matching.
 func fuzzyMatch(s, query string) bool {
 	// s = the name of the package
 	// q/query = the search query being typed
@@ -233,6 +240,7 @@ func fuzzyMatch(s, query string) bool {
 	return qi == len(q)
 }
 
+// Filters displayPackages by search query and updates the info panel.
 func (m Model) applyFilter() Model {
 	if m.searchQuery == "" {
 		m.displayPackages = m.packages
@@ -256,6 +264,7 @@ func (m Model) applyFilter() Model {
 	return m
 }
 
+// Sets m.info to the formula data at the current cursor position.
 func (m Model) updateInfo() Model {
 	if len(m.displayPackages) > 0 && m.cursor < len(m.displayPackages) {
 		name := m.displayPackages[m.cursor]
@@ -268,6 +277,7 @@ func (m Model) updateInfo() Model {
 	return m
 }
 
+// Handles all events: window resize, data from background goroutines, keyboard.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
@@ -373,6 +383,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// Renders the complete terminal UI.
 func (m Model) View() string {
 	switch {
 	case m.loading:
@@ -412,6 +423,7 @@ func (m Model) View() string {
 	return docStyle.Render(body)
 }
 
+// Loading screen shown while formulae are being fetched.
 func (m Model) renderLoading() string {
 	countLine := "  Loading formula data..."
 	if m.formulaeCount > 0 {
@@ -426,6 +438,7 @@ func (m Model) renderLoading() string {
 	}, "\n"))
 }
 
+// Draws the search input with a bordered frame and cursor.
 func (m Model) renderSearchBar(width int, focused bool) string {
 	borderColor := teal
 	if !focused {
@@ -464,6 +477,7 @@ func (m Model) renderSearchBar(width int, focused bool) string {
 	return strings.Join([]string{top, body, bottom}, "\n")
 }
 
+// Scrollable package list on the left side.
 func (m Model) renderLeftPanel(width int, boxHeight int) string {
 	visibleHeight := boxHeight - 2
 
@@ -490,6 +504,7 @@ func (m Model) renderLeftPanel(width int, boxHeight int) string {
 	return renderPaneBox(width, boxTitle, strings.Join(listItems, "\n"))
 }
 
+// Detail panel on the right with formula details
 func (m Model) renderRightPanel(width int) string {
 	if len(m.displayPackages) == 0 {
 		return renderPaneBox(width, "Details",
@@ -516,7 +531,6 @@ func (m Model) renderRightPanel(width int) string {
 			contentLines = append(contentLines, descStyle.Render(info.Desc))
 		}
 
-		// Build all section content first to compute consistent box width
 		type sectionData struct {
 			title string
 			lines []string
@@ -603,7 +617,6 @@ func (m Model) renderRightPanel(width int) string {
 			sections = append(sections, sectionData{"Build Dependencies", []string{line}})
 		}
 
-		// Compute consistent section box width
 		sectionWidth := width
 		if len(allWidths) > 0 {
 			maxW := 0
@@ -613,7 +626,6 @@ func (m Model) renderRightPanel(width int) string {
 				}
 			}
 
-			// some math
 			sectionWidth = min(width, max(maxW+4, 6))
 		}
 
@@ -640,8 +652,8 @@ func (m Model) renderRightPanel(width int) string {
 	return renderPaneBox(width, "Details", strings.Join(contentLines, "\n"))
 }
 
+// Status bar with keybindings and error state.
 func (m Model) renderFooter() string {
-	// left := ResultStyle.Render(fmt.Sprintf("%d formulae", len(m.displayPackages)))
 	apiErrMsg := ""
 	if m.apiErr != nil {
 		apiErrMsg += "  " + ErrorStyle.Render("API unavailable")
@@ -650,6 +662,7 @@ func (m Model) renderFooter() string {
 	return apiErrMsg + "  " + help
 }
 
+// Single-column list for terminals narrower than 60 columns.
 func (m Model) listViewFallback() string {
 	title := TitleStyle.Render(fmt.Sprintf("pkgui  (%d)", len(m.packages)))
 
@@ -679,8 +692,6 @@ func (m Model) listViewFallback() string {
 		}
 	}
 
-	// result := ResultStyle.Render(fmt.Sprintf("%d formulae", len(m.displayPackages)))
-	// footer := result + FooterStyle.Render("•  / search  •  ↑↓ navigate  •  q quit")
 	body := lipgloss.JoinVertical(lipgloss.Left, title, sep, list)
 	return docStyle.Render(body)
 }

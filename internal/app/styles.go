@@ -3,9 +3,9 @@ package app
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	teal     = lipgloss.Color("#5bc0be")
-	tealDark = lipgloss.Color("#3b9b99")
-	amber    = lipgloss.Color("#e4b95b")
+	teal     = lipgloss.Color("#5bc0be") // primary accent
+	tealDark = lipgloss.Color("#3b9b99") // muted for unfocused states
+	amber    = lipgloss.Color("#e4b95b") // highlights and badges
 )
 
 var (
