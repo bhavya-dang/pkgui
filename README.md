@@ -76,13 +76,12 @@ pkgui
 
 ### Keybindings
 
-| Key            | Action                        |
-| -------------- | ----------------------------- |
-| `↑` / `↓`      | Navigate package list         |
-| `/`            | Start search (type to filter) |
-| `Esc`          | Exit search                   |
-| `Enter`        | Confirm search                |
-| `q` / `Ctrl+C` | Quit                          |
+| Key            | Action                         |
+| -------------- | ------------------------------ |
+| `↑` / `↓`      | Navigate package list          |
+| `/`            | Toggle search (type to filter) |
+| `Esc`          | Exit search                    |
+| `q` / `Ctrl+C` | Quit                           |
 
 ## Support
 
