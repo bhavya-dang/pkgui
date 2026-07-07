@@ -1,4 +1,4 @@
-module github.com/bhavyadang/pkgui
+module github.com/bhavya-dang/pkgui
 
 go 1.25.5
 
