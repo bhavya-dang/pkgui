@@ -6,7 +6,7 @@ A terminal UI for managing packages across multiple package managers.
 
 <br/>
 
-![Screenshot 1](./preview/2.png)
+<video src="https://github.com/bhavya-dang/pkgui/blob/master/preview/3.mp4?raw=true" width="100%" controls></video>
 
 ## Features
 
@@ -17,14 +17,17 @@ A terminal UI for managing packages across multiple package managers.
 
 ## Roadmap
 
-- Cask support
-- npm / yarn / pnpm
-- pip
-- upgrade/remove packages
+- [x] installed formulae
+- [ ] installed casks/taps
+- [x] installed npm packages
+- [ ] installed pip packages
+- [ ] upgrade/remove packages
+- [ ] search packages
 
 ## Currently Supported PMs
 
 - **Homebrew** (formulae)
+- **npm**
 
 ## Prerequisites
 
@@ -48,7 +51,7 @@ go install github.com/bhavyadang/pkgui@latest
 ### Using install.sh
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/bhavyadang/pkgui/main/install.sh | sh
+curl -sSL https://raw.githubusercontent.com/bhavya-dang/pkgui/refs/heads/master/install.sh | sh
 ```
 
 ### Using Makefile
@@ -86,8 +89,15 @@ pkgui
 ## Support
 
 - Homebrew
-  - formulae (with detail view from the Homebrew API)
+  - installed formulae (with detail view from the Homebrew API)
+- npm
+  - installed packages
 
 ## License
 
 MIT
+
+## Contributions
+
+I am actively working on this project. Feel free to raise any issues you find.
+If you want to contribute something, let me know or raise an issue, fork the repo, and start contributing!
