@@ -33,20 +33,15 @@ A terminal UI for managing packages across multiple package managers.
 ## Prerequisites
 
 - [Homebrew](https://brew.sh)
+- [npm](https://www.npmjs.com/)
 - Go 1.25+ (if building from source)
 
 ## Installation
 
-### Using Homebrew
-
-```bash
-brew install bhavya-dang/pkgui/pkgui
-```
-
 ### Using Go
 
 ```bash
-go install github.com/bhavyadang/pkgui@latest
+go install github.com/bhavya-dang/pkgui@latest
 ```
 
 ### Using install.sh
@@ -58,7 +53,7 @@ curl -sSL https://raw.githubusercontent.com/bhavya-dang/pkgui/refs/heads/master/
 ### Using Makefile
 
 ```bash
-git clone https://github.com/bhavyadang/pkgui.git
+git clone https://github.com/bhavya-dang/pkgui.git
 cd pkgui
 make install
 ```
@@ -66,7 +61,7 @@ make install
 ### Manual
 
 ```bash
-git clone https://github.com/bhavyadang/pkgui.git
+git clone https://github.com/bhavya-dang/pkgui.git
 cd pkgui
 go build -o build/pkgui .
 cp build/pkgui "$GOPATH/bin/pkgui"
