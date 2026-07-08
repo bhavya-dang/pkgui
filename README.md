@@ -6,7 +6,8 @@ A terminal UI for managing packages across multiple package managers.
 
 <br/>
 
-![demo gif](./preview/demo.gif)
+![demo 1](./preview/3.png)
+![demo 2](./preview/4.png)
 
 ## Features
 
