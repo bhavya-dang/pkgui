@@ -6,11 +6,7 @@ A terminal UI for managing packages across multiple package managers.
 
 <br/>
 
-<<<<<<< Updated upstream
-![Screenshot 1](./preview/2.png)
-=======
-<video src="https://github.com/bhavya-dang/pkgui/blob/master/preview/demo.mp4?raw=true" width="100%" controls></video>
->>>>>>> Stashed changes
+![demo gif](./preview/demo.gif)
 
 ## Features
 
