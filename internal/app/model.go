@@ -940,7 +940,7 @@ func (m Model) renderFooter() string {
 		themeName = currentTheme.Name
 	}
 	help := FooterStyle.Render(
-		fmt.Sprintf("[← → tabs]  [/ search]  [↑↓ navigate]  [t theme  %s]  [q quit]", themeName),
+		fmt.Sprintf("[← → tabs]  [/ search]  [↑↓ navigate]  [t theme  %s]  [q / ctrl+c quit]", themeName),
 	)
 	return countStr + apiErrMsg + "  " + help
 }

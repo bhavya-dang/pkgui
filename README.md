@@ -14,17 +14,27 @@ A terminal UI for managing packages across multiple package managers.
 
 - List installed packages
 - Fuzzy search installed packages (`/` to search)
-- View package details: version (installed/latest), description, homepage, license, dependencies, installation path
+- View package details:
+  - version (installed/latest)
+  - description
+  - homepage
+  - license
+  - dependencies
+  - installation path
+  - binary size
 - Scrollable package list with keyboard navigation
+- Switch themes (5 theme palettes to select from)
 
 ## Roadmap
 
 - [x] installed formulae
-- [ ] installed casks/taps
+- [ ] installed casks/taps ([#29](https://github.com/bhavya-dang/pkgui/issues/29))
 - [x] installed npm packages
-- [ ] installed pip packages
-- [ ] upgrade/remove packages
-- [ ] search packages
+- [ ] installed pip packages ([#20](https://github.com/bhavya-dang/pkgui/issues/20))
+- [ ] upgrade/remove packages ([#3](https://github.com/bhavya-dang/pkgui/issues/3))
+- [ ] search packages ([#19](https://github.com/bhavya-dang/pkgui/issues/19))
+- [x] multi-theme support ([#9](https://github.com/bhavya-dang/pkgui/issues/9))
+- [ ] persist user configuration ([#27](https://github.com/bhavya-dang/pkgui/issues/27))
 
 ## Currently Supported PMs
 
@@ -79,8 +89,10 @@ pkgui
 | Key            | Action                         |
 | -------------- | ------------------------------ |
 | `↑` / `↓`      | Navigate package list          |
+| `←` / `→`      | Switch between package managers (tabs) |
 | `/`            | Toggle search (type to filter) |
-| `Esc`          | Exit search                    |
+| `t`            | Open theme selector            |
+| `Esc`          | Exit search / close overlay    |
 | `q` / `Ctrl+C` | Quit                           |
 
 ## Support
