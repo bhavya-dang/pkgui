@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ type BrewListMsg struct {
 	Names             []string
 	Paths             map[string]string
 	InstalledVersions map[string]string
+	Sizes             map[string]int64
 }
 
 type BrewErrMsg error
@@ -89,7 +91,21 @@ func (b *BrewManager) fetchBrewList() tea.Cmd {
 			}
 		}
 
-		return BrewListMsg{names, paths, installedVersions}
+		sizes := make(map[string]int64, len(names))
+		for _, name := range names {
+			if path, ok := paths[name]; ok {
+				if out, err := exec.Command("du", "-skL", path).Output(); err == nil {
+					fields := strings.Fields(string(out))
+					if len(fields) > 0 {
+						if kb, err := strconv.ParseInt(fields[0], 10, 64); err == nil {
+							sizes[name] = kb * 1024
+						}
+					}
+				}
+			}
+		}
+
+		return BrewListMsg{names, paths, installedVersions, sizes}
 	}
 }
 

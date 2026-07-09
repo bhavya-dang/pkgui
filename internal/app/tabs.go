@@ -9,16 +9,16 @@ import (
 func (m Model) renderTabBar(width int) string {
 	activeStyle := lipgloss.NewStyle().
 		Bold(true).
-		Background(amber).
-		Foreground(lipgloss.Color("#000")).
+		Background(currentTheme.Primary).
+		Foreground(currentTheme.SelectedFg).
 		Padding(0, 2)
 
 	inactiveStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#60788a")).
+		Foreground(currentTheme.DimText).
 		Padding(0, 1)
 
 	separator := lipgloss.NewStyle().
-		Foreground(tealDark).
+		Foreground(currentTheme.Muted).
 		Render(" ")
 
 	var cells []string

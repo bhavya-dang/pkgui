@@ -58,12 +58,17 @@ func (n *NpmManager) ListInstalled() tea.Cmd {
 	}
 }
 
+type NpmDist struct {
+	UnpackedSize int64 `json:"unpackedSize"`
+}
+
 type NpmDetailData struct {
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	Description string `json:"description"`
-	License     string `json:"license"`
-	Homepage    string `json:"homepage"`
+	Name        string   `json:"name"`
+	Version     string   `json:"version"`
+	Description string   `json:"description"`
+	License     string   `json:"license"`
+	Homepage    string   `json:"homepage"`
+	Dist        *NpmDist `json:"dist,omitempty"`
 }
 
 type NpmAllDetailsMsg map[string]*NpmDetailData
