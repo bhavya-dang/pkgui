@@ -24,6 +24,7 @@ A terminal UI for managing packages across multiple package managers.
   - binary size
 - Scrollable package list with keyboard navigation
 - Switch themes (5 theme palettes to select from)
+  - Default theme is [Solace](https://github.com/bhavya-dang/Solace)
 
 ## Roadmap
 
@@ -86,14 +87,14 @@ pkgui
 
 ### Keybindings
 
-| Key            | Action                         |
-| -------------- | ------------------------------ |
-| `↑` / `↓`      | Navigate package list          |
+| Key            | Action                                 |
+| -------------- | -------------------------------------- |
+| `↑` / `↓`      | Navigate package list                  |
 | `←` / `→`      | Switch between package managers (tabs) |
-| `/`            | Toggle search (type to filter) |
-| `t`            | Open theme selector            |
-| `Esc`          | Exit search / close overlay    |
-| `q` / `Ctrl+C` | Quit                           |
+| `/`            | Toggle search (type to filter)         |
+| `t`            | Open theme selector                    |
+| `Esc`          | Exit search / close overlay            |
+| `q` / `Ctrl+C` | Quit                                   |
 
 ## Support
 
