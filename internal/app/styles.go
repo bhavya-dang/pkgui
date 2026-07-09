@@ -3,76 +3,99 @@ package app
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	teal     = lipgloss.Color("#5bc0be") // primary accent
-	tealDark = lipgloss.Color("#3b9b99") // muted for unfocused states
-	amber    = lipgloss.Color("#e4b95b") // highlights and badges
+	currentTheme *Theme
+
+	violet     lipgloss.Color
+	violetDark lipgloss.Color
+
+	TitleStyle          lipgloss.Style
+	ItemStyle           lipgloss.Style
+	SelectedItemStyle   lipgloss.Style
+	ResultStyle         lipgloss.Style
+	FooterStyle         lipgloss.Style
+	LoadingStyle        lipgloss.Style
+	LoadingCountStyle   lipgloss.Style
+	ErrorStyle          lipgloss.Style
+	DetailTitleStyle    lipgloss.Style
+	DetailLabelStyle    lipgloss.Style
+	DetailValueStyle    lipgloss.Style
+	DetailSectionStyle  lipgloss.Style
+	SearchBarStyle      lipgloss.Style
+	SearchPlaceholderStyle lipgloss.Style
+	LinkStyle           lipgloss.Style
+	SectionContentStyle lipgloss.Style
+	docStyle            lipgloss.Style
 )
 
-var (
+func applyTheme(t *Theme) {
+	currentTheme = t
+	violet = t.Primary
+	violetDark = t.Muted
+
 	TitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(teal).
-			Padding(0, 1)
+		Bold(true).
+		Foreground(violet).
+		Padding(0, 1)
 
 	ItemStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#c0d4e4")).
-			Padding(0, 1)
+		Bold(true).
+		Foreground(t.Text)
 
 	SelectedItemStyle = lipgloss.NewStyle().
-				Background(tealDark).
-				Foreground(lipgloss.Color("#ffffff")).
-				Padding(0, 1)
+		Bold(true).
+		Background(t.SelectedBg).
+		Foreground(t.SelectedFg)
 
-	ResultStyle = lipgloss.NewStyle().Foreground(teal)
+	ResultStyle = lipgloss.NewStyle().Foreground(violet)
 
 	FooterStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#60788a"))
+		Foreground(t.DimText)
 
 	LoadingStyle = lipgloss.NewStyle().
-			Foreground(teal).
-			Italic(true)
+		Foreground(violet).
+		Italic(true)
 
 	LoadingCountStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(amber)
+		Bold(true).
+		Foreground(violet)
 
 	ErrorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#ef4444")).
-			Bold(true)
+		Foreground(t.Error).
+		Bold(true)
 
 	DetailTitleStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(amber).
-				Padding(0, 1)
+		Bold(true).
+		Foreground(violet)
 
 	DetailLabelStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(teal)
+		Bold(true).
+		Foreground(violet)
 
 	DetailValueStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#c0d4e4"))
+		Foreground(t.DetailText)
 
 	DetailSectionStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(amber).
-				Padding(0, 1)
+		Bold(true).
+		Foreground(violet).
+		Padding(0, 1)
 
 	SearchBarStyle = lipgloss.NewStyle().
-			Foreground(teal).
-			Bold(true).
-			Padding(0, 1)
+		Foreground(violet).
+		Bold(true).
+		Padding(0, 1)
 
 	SearchPlaceholderStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#60788a")).
-				Italic(true)
+		Foreground(t.DimText).
+		Italic(true)
 
 	LinkStyle = lipgloss.NewStyle().
-			Foreground(amber).Underline(true)
+		Foreground(violet).
+		Underline(true)
 
 	SectionContentStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#e0e0e0")).
-				Padding(0, 1)
+		Foreground(t.Text).
+		Padding(0, 1)
 
 	docStyle = lipgloss.NewStyle().
-			Padding(1, 3, 1, 3)
-)
+		Padding(1, 3, 1, 3)
+}

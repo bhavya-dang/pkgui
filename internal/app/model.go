@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -18,6 +19,7 @@ type BrewState struct {
 	Info              *pm.FormulaData
 	InstallPaths      map[string]string
 	InstalledVersions map[string]string
+	Sizes             map[string]int64
 	BrewListDone      bool
 	BrewFormulaeDone  bool
 }
@@ -35,9 +37,7 @@ type TabState struct {
 	Brew            *BrewState
 	NpmDetails      map[string]*pm.NpmDetailData
 	NpmDetailsReady bool
-	// PipDetails      map[string]*pm.PipDetailData
-	// PipDetailsReady bool
-	DetailErr error
+	DetailErr       error
 }
 
 type progressTick struct{}
@@ -57,13 +57,26 @@ type Model struct {
 	height       int
 	searchActive bool
 	searchQuery  string
+
+	spinner    spinner.Model
+	spinnerCmd tea.Cmd
+
+	themeOverlay bool
+	themeCursor  int
+
+	sparklineHistory []float64
 }
 
 func New() Model {
+	applyTheme(themes[0])
+
+	s := spinner.New()
+	s.Style = lipgloss.NewStyle().Foreground(themes[0].Primary)
+	s.Spinner = spinner.MiniDot
+
 	managers := []pm.Manager{
 		pm.NewBrewManager(0),
 		pm.NewNpmManager(1),
-		// pm.NewPipManager(2),
 	}
 	states := make([]TabState, len(managers))
 	for i, m := range managers {
@@ -80,14 +93,16 @@ func New() Model {
 		}
 	}
 	return Model{
-		activeTab: 0,
-		tabs:      managers,
-		states:    states,
+		activeTab:        0,
+		tabs:             managers,
+		states:           states,
+		spinner:          s,
+		sparklineHistory: make([]float64, 0, 40),
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{tickCmd()}
+	cmds := []tea.Cmd{tickCmd(), m.spinner.Tick}
 	for _, t := range m.tabs {
 		cmds = append(cmds, t.ListInstalled())
 	}
@@ -153,6 +168,14 @@ func (m Model) selectPackageCmd() tea.Cmd {
 	return nil
 }
 
+func (m Model) totalPackages() int {
+	total := 0
+	for i := range m.states {
+		total += len(m.states[i].displayPackages)
+	}
+	return total
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
@@ -174,12 +197,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if tab.Name() == "npm" {
 				return m, pm.FetchAllNpmDetails(msg.Packages)
 			}
-			// if tab.Name() == "pip" {
-			// 	return m, pm.FetchAllPipDetails(msg.Packages)
-			// }
 		}
 		st.progressTarget = 1.0
 		st.progress = 1.0
+		m.updateSparkline()
 
 	case pm.BrewListMsg:
 		st := &m.states[0]
@@ -188,6 +209,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			st.displayPackages = msg.Names
 			st.Brew.InstallPaths = msg.Paths
 			st.Brew.InstalledVersions = msg.InstalledVersions
+			st.Brew.Sizes = msg.Sizes
 			st.Brew.BrewListDone = true
 			st.progressTarget = 0.85
 			if st.Brew.BrewFormulaeDone {
@@ -196,6 +218,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				st.progress = 1.0
 				m = m.updateBrewInfo()
 			}
+			m.updateSparkline()
 		}
 
 	case pm.BrewErrMsg:
@@ -236,7 +259,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case pm.NpmAllDetailsMsg:
-		// msg arrives from any tab; route to npm tab (index 1)
 		st := &m.states[1]
 		if st.NpmDetails == nil {
 			st.NpmDetails = map[string]*pm.NpmDetailData(msg)
@@ -247,16 +269,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		st.NpmDetailsReady = true
 
-	// case pm.PipAllDetailsMsg:
-	// 	st := &m.states[2]
-	// 	if st.PipDetails == nil {
-	// 		st.PipDetails = map[string]*pm.PipDetailData(msg)
-	// 	} else {
-	// 		for k, v := range msg {
-	// 			st.PipDetails[k] = v
-	// 		}
-	// 	}
-	// 	st.PipDetailsReady = true
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 
 	case progressTick:
 		if m.allLoaded() {
@@ -279,6 +295,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickCmd()
 
 	case tea.KeyMsg:
+		if m.themeOverlay {
+			switch msg.String() {
+			case "esc", "t":
+				m.themeOverlay = false
+				applyTheme(themes[m.themeCursor])
+				return m, nil
+			case "enter":
+				m.themeOverlay = false
+				applyTheme(themes[m.themeCursor])
+				return m, nil
+			case "up":
+				if m.themeCursor > 0 {
+					m.themeCursor--
+					applyTheme(themes[m.themeCursor])
+				}
+				return m, nil
+			case "down":
+				if m.themeCursor < len(themes)-1 {
+					m.themeCursor++
+					applyTheme(themes[m.themeCursor])
+				}
+				return m, nil
+			default:
+				return m, nil
+			}
+		}
+
 		if m.searchActive {
 			switch msg.String() {
 			case "esc":
@@ -323,6 +366,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+
+		case "t":
+			if m.allLoaded() {
+				m.themeOverlay = true
+				m.themeCursor = 0
+				for i, t := range themes {
+					if t == currentTheme {
+						m.themeCursor = i
+						break
+					}
+				}
+				return m, nil
+			}
 
 		case "/":
 			m.searchActive = true
@@ -371,6 +427,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateSparkline() {
+	total := 0
+	for i := range m.states {
+		total += len(m.states[i].packages)
+	}
+	m.sparklineHistory = append(m.sparklineHistory, float64(total))
+	if len(m.sparklineHistory) > 40 {
+		m.sparklineHistory = m.sparklineHistory[len(m.sparklineHistory)-40:]
+	}
+}
+
+func (m Model) renderHeader() string {
+	label := lipgloss.NewStyle().Bold(true).Foreground(currentTheme.Primary).Render("pkgui — a terminal dashboard for everything you've installed ")
+
+	sparkText := ""
+	sparkW := min(20, max(1, (m.width-20)/3))
+	if len(m.sparklineHistory) > 1 {
+		maxVal := 0.0
+		for _, v := range m.sparklineHistory {
+			if v > maxVal {
+				maxVal = v
+			}
+		}
+		if maxVal == 0 {
+			maxVal = 1
+		}
+		norm := make([]float64, len(m.sparklineHistory))
+		for i, v := range m.sparklineHistory {
+			norm[i] = v / maxVal
+		}
+		sparkH := 2
+		sparkText = RenderBrailleSparkline(norm, sparkW, sparkH)
+	}
+
+	if sparkText != "" {
+		return label + "\n" + sparkText
+	}
+	return label
+}
+
 func (m Model) View() string {
 	if m.width == 0 {
 		return ""
@@ -396,7 +492,7 @@ func (m Model) View() string {
 	searchLine := m.renderSearchBar(contentWidth, m.searchActive)
 	searchOffset := strings.Count(searchLine, "\n") + 1
 
-	boxHeight := m.height - 5 - searchOffset
+	boxHeight := max(0, m.height-12-searchOffset)
 
 	leftPanel := m.renderLeftPanel(leftWidth, boxHeight)
 	rightPanel := m.renderRightPanel(rightWidth)
@@ -407,6 +503,8 @@ func (m Model) View() string {
 	top := lipgloss.JoinHorizontal(lipgloss.Top, leftStyled, rightStyled)
 
 	var bodyParts []string
+	bodyParts = append(bodyParts, m.renderHeader())
+	bodyParts = append(bodyParts, "")
 	bodyParts = append(bodyParts, m.renderTabBar(contentWidth))
 	bodyParts = append(bodyParts, "")
 	bodyParts = append(bodyParts, searchLine)
@@ -415,7 +513,14 @@ func (m Model) View() string {
 	bodyParts = append(bodyParts, m.renderFooter())
 
 	body := lipgloss.JoinVertical(lipgloss.Left, bodyParts...)
-	return docStyle.Render(body)
+
+	rendered := docStyle.Render(body)
+
+	if m.themeOverlay {
+		return m.renderThemeOverlay()
+	}
+
+	return rendered
 }
 
 func (m Model) allLoaded() bool {
@@ -428,15 +533,40 @@ func (m Model) allLoaded() bool {
 }
 
 func (m Model) renderLoading() string {
-	doneStyle := lipgloss.NewStyle().Foreground(teal).Bold(true)
-	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(amber)
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#60788a"))
-	fillStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#c0d4e4"))
-	emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#3a4a55"))
+	doneStyle := lipgloss.NewStyle().Foreground(currentTheme.Primary).Bold(true)
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(currentTheme.Primary)
+	fillStyle := lipgloss.NewStyle().Foreground(currentTheme.DetailText)
+	emptyStyle := lipgloss.NewStyle().Foreground(currentTheme.DimText)
+
+	// title := lipgloss.NewStyle().Bold(true).Foreground(currentTheme.Primary).Render("pkgui — browse your packages")
+	spinnerLine := lipgloss.NewStyle().Foreground(currentTheme.Primary).Render(
+		m.spinner.View() + " Loading packages...",
+	)
+
+	sparkW := min(30, max(5, m.width/3))
+	var sparkArea string
+	if len(m.sparklineHistory) > 1 {
+		maxVal := 0.0
+		for _, v := range m.sparklineHistory {
+			if v > maxVal {
+				maxVal = v
+			}
+		}
+		if maxVal == 0 {
+			maxVal = 1
+		}
+		norm := make([]float64, len(m.sparklineHistory))
+		for i, v := range m.sparklineHistory {
+			norm[i] = v / maxVal
+		}
+		sparkH := 3
+		sparkArea = RenderBrailleSparkline(norm, sparkW, sparkH)
+	}
 
 	var lines []string
+	// lines = append(lines, title)
 	lines = append(lines, "")
-	lines = append(lines, "  Loading pkgui...")
+	lines = append(lines, "  "+spinnerLine)
 	lines = append(lines, "")
 
 	for i, tab := range m.tabs {
@@ -454,38 +584,35 @@ func (m Model) renderLoading() string {
 			n = 20
 		}
 		bar := "[" + fillStyle.Render(strings.Repeat("█", n)) + emptyStyle.Render(strings.Repeat("░", 20-n)) + "]"
-		status := ""
-		if tab.Name() == "brew" {
-			if st.Brew != nil && st.Brew.BrewListDone {
-				status = dimStyle.Render("  formulae...")
-			} else {
-				status = dimStyle.Render("  packages...")
-			}
-		}
-		lines = append(lines, "  "+label+"  "+bar+status)
+		lines = append(lines, "  "+label+"  "+bar)
+	}
+
+	if sparkArea != "" {
+		lines = append(lines, "")
+		lines = append(lines, sparkArea)
 	}
 
 	return LoadingStyle.Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) renderSearchBar(width int, focused bool) string {
-	borderColor := teal
+	borderColor := currentTheme.Primary
 	if !focused {
-		borderColor = tealDark
+		borderColor = currentTheme.Muted
 	}
 	border := lipgloss.NewStyle().Foreground(borderColor)
-	amberBold := lipgloss.NewStyle().Bold(true).Foreground(amber)
+	violetBold := lipgloss.NewStyle().Bold(true).Foreground(currentTheme.Primary)
 
 	badge := "Search"
-	top := border.Render("╭─ ") +
-		amberBold.Render(badge) +
-		border.Render(" "+strings.Repeat("─", max(0, width-5-lipgloss.Width(badge)))+"╮")
+	top := border.Render("┏━ ") +
+		violetBold.Render(badge) +
+		border.Render(" "+strings.Repeat("━", max(0, width-5-lipgloss.Width(badge)))+"┓")
 
 	inner := width - 4
 
 	var inputLine string
 	if focused {
-		cursor := lipgloss.NewStyle().Foreground(amber).Render("█")
+		cursor := lipgloss.NewStyle().Foreground(currentTheme.Primary).Render("█")
 		if m.searchQuery == "" {
 			inputLine = cursor + " " + SearchPlaceholderStyle.Render("Search packages...")
 		} else {
@@ -500,8 +627,8 @@ func (m Model) renderSearchBar(width int, focused bool) string {
 	}
 
 	padded := lipgloss.NewStyle().Width(inner).Render(inputLine)
-	body := border.Render("│ ") + padded + border.Render(" │")
-	bottom := border.Render("╰" + strings.Repeat("─", width-2) + "╯")
+	body := border.Render("┃ ") + padded + border.Render(" ┃")
+	bottom := border.Render("┗" + strings.Repeat("━", width-2) + "┛")
 
 	return strings.Join([]string{top, body, bottom}, "\n")
 }
@@ -509,6 +636,7 @@ func (m Model) renderSearchBar(width int, focused bool) string {
 func (m Model) renderLeftPanel(width int, boxHeight int) string {
 	st := m.states[m.activeTab]
 	visibleHeight := boxHeight - 2
+	innerWidth := width - 4
 
 	start := 0
 	if st.cursor >= visibleHeight {
@@ -523,9 +651,10 @@ func (m Model) renderLeftPanel(width int, boxHeight int) string {
 	for i := start; i < end; i++ {
 		pkg := st.displayPackages[i]
 		if i == st.cursor {
-			listItems = append(listItems, SelectedItemStyle.Render("▸ "+pkg))
+			style := SelectedItemStyle.Width(innerWidth)
+			listItems = append(listItems, style.Render(pkg))
 		} else {
-			listItems = append(listItems, ItemStyle.Render("  "+pkg))
+			listItems = append(listItems, ItemStyle.Render(pkg))
 		}
 	}
 
@@ -538,7 +667,7 @@ func (m Model) renderRightPanel(width int) string {
 
 	if len(st.displayPackages) == 0 {
 		return renderPaneBox(width, "Details",
-			lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("#c0d4e4")).Render("No packages match your query"))
+			lipgloss.NewStyle().PaddingLeft(2).Foreground(currentTheme.DetailText).Render("No packages match your query"))
 	}
 
 	if st.Brew != nil {
@@ -547,11 +676,8 @@ func (m Model) renderRightPanel(width int) string {
 	if m.tabs[m.activeTab].Name() == "npm" {
 		return m.renderNpmDetail(width, st)
 	}
-	// if m.tabs[m.activeTab].Name() == "pip" {
-	// 	return m.renderPipDetail(width, st)
-	// }
 	return renderPaneBox(width, "Details",
-		lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("#c0d4e4")).Render("Details coming soon for this package manager"))
+		lipgloss.NewStyle().PaddingLeft(2).Foreground(currentTheme.DetailText).Render("Details coming soon for this package manager"))
 }
 
 func (m Model) renderBrewDetail(width int, st TabState) string {
@@ -560,10 +686,11 @@ func (m Model) renderBrewDetail(width int, st TabState) string {
 	}
 
 	pkgName := st.displayPackages[st.cursor]
-	title := DetailTitleStyle.Render("📦 " + pkgName)
 
 	var contentLines []string
-	contentLines = append(contentLines, title)
+	contentLines = append(contentLines, "")
+	contentLines = append(contentLines, DetailTitleStyle.Render("📦 "+pkgName))
+	contentLines = append(contentLines, "")
 
 	if st.Brew.APIErr != nil {
 		contentLines = append(contentLines,
@@ -572,10 +699,8 @@ func (m Model) renderBrewDetail(width int, st TabState) string {
 		info := st.Brew.Info
 
 		if info.Desc != "" {
-			descStyle := lipgloss.NewStyle().
-				PaddingLeft(2).
-				Foreground(lipgloss.Color("#c0d4e4"))
-			contentLines = append(contentLines, descStyle.Render(info.Desc))
+			contentLines = append(contentLines, renderSection(width, "Description", info.Desc))
+			contentLines = append(contentLines, "")
 		}
 
 		type sectionData struct {
@@ -605,7 +730,7 @@ func (m Model) renderBrewDetail(width int, st TabState) string {
 			}
 			var lines []string
 			for _, p := range pkgPairs {
-				label := lipgloss.NewStyle().Width(maxLabel).Bold(true).Foreground(teal).Render(p[0])
+				label := lipgloss.NewStyle().Width(maxLabel).Bold(true).Foreground(currentTheme.Primary).Render(p[0])
 				value := DetailValueStyle.Render(p[1])
 				line := label + "  " + value
 				allWidths = append(allWidths, lipgloss.Width(line))
@@ -621,6 +746,11 @@ func (m Model) renderBrewDetail(width int, st TabState) string {
 		if info.Homepage != "" {
 			metaPairs = append(metaPairs, [2]string{"Homepage", info.Homepage})
 		}
+		if st.Brew.Sizes != nil {
+			if size, ok := st.Brew.Sizes[pkgName]; ok && size > 0 {
+				metaPairs = append(metaPairs, [2]string{"Size", humanSize(size)})
+			}
+		}
 		if len(metaPairs) > 0 {
 			maxLabel := 0
 			for _, p := range metaPairs {
@@ -631,7 +761,7 @@ func (m Model) renderBrewDetail(width int, st TabState) string {
 			}
 			var lines []string
 			for _, p := range metaPairs {
-				label := lipgloss.NewStyle().Width(maxLabel).Bold(true).Foreground(teal).Render(p[0])
+				label := lipgloss.NewStyle().Width(maxLabel).Bold(true).Foreground(currentTheme.Primary).Render(p[0])
 				var value string
 				if p[0] == "Homepage" {
 					value = LinkStyle.Render(p[1])
@@ -668,15 +798,6 @@ func (m Model) renderBrewDetail(width int, st TabState) string {
 			sectionWidth = min(width, max(maxW+4, 6))
 		}
 
-		hasContent := len(sections) > 0 || info.Desc != ""
-		if hasContent {
-			contentLines = append(contentLines, "")
-			contentLines = append(contentLines,
-				lipgloss.NewStyle().Foreground(teal).
-					Render(strings.Repeat("─", max(0, width-4))))
-			contentLines = append(contentLines, "")
-		}
-
 		for _, s := range sections {
 			contentLines = append(contentLines, renderSection(sectionWidth, s.title, s.lines...))
 		}
@@ -686,15 +807,19 @@ func (m Model) renderBrewDetail(width int, st TabState) string {
 			DetailValueStyle.Render("  No formula data available"))
 	}
 
+	contentLines = append(contentLines, "")
+
 	return renderPaneBox(width, "Details", strings.Join(contentLines, "\n"))
 }
 
 func (m Model) renderNpmDetail(width int, st TabState) string {
 	pkgName := st.displayPackages[st.cursor]
-	title := DetailTitleStyle.Render("📦 " + pkgName)
+	// origin := m.tabs[m.activeTab].Name()
 
 	var contentLines []string
-	contentLines = append(contentLines, title)
+	contentLines = append(contentLines, "")
+	contentLines = append(contentLines, DetailTitleStyle.Render("📦 "+pkgName))
+	contentLines = append(contentLines, "")
 
 	if !st.NpmDetailsReady {
 		contentLines = append(contentLines,
@@ -702,10 +827,8 @@ func (m Model) renderNpmDetail(width int, st TabState) string {
 	} else if info, ok := st.NpmDetails[pkgName]; ok {
 
 		if info.Description != "" {
-			descStyle := lipgloss.NewStyle().
-				PaddingLeft(2).
-				Foreground(lipgloss.Color("#c0d4e4"))
-			contentLines = append(contentLines, descStyle.Render(info.Description))
+			contentLines = append(contentLines, renderSection(width, "Description", info.Description))
+			contentLines = append(contentLines, "")
 		}
 
 		type sectionData struct {
@@ -732,7 +855,7 @@ func (m Model) renderNpmDetail(width int, st TabState) string {
 			}
 			var lines []string
 			for _, p := range pkgPairs {
-				label := lipgloss.NewStyle().Width(maxLabel).Bold(true).Foreground(teal).Render(p[0])
+				label := lipgloss.NewStyle().Width(maxLabel).Bold(true).Foreground(currentTheme.Primary).Render(p[0])
 				value := DetailValueStyle.Render(p[1])
 				line := label + "  " + value
 				allWidths = append(allWidths, lipgloss.Width(line))
@@ -748,6 +871,9 @@ func (m Model) renderNpmDetail(width int, st TabState) string {
 		if info.Homepage != "" {
 			metaPairs = append(metaPairs, [2]string{"Homepage", info.Homepage})
 		}
+		if info.Dist != nil && info.Dist.UnpackedSize > 0 {
+			metaPairs = append(metaPairs, [2]string{"Size", humanSize(info.Dist.UnpackedSize)})
+		}
 		if len(metaPairs) > 0 {
 			maxLabel := 0
 			for _, p := range metaPairs {
@@ -758,7 +884,7 @@ func (m Model) renderNpmDetail(width int, st TabState) string {
 			}
 			var lines []string
 			for _, p := range metaPairs {
-				label := lipgloss.NewStyle().Width(maxLabel).Bold(true).Foreground(teal).Render(p[0])
+				label := lipgloss.NewStyle().Width(maxLabel).Bold(true).Foreground(currentTheme.Primary).Render(p[0])
 				var value string
 				if p[0] == "Homepage" {
 					value = LinkStyle.Render(p[1])
@@ -783,15 +909,6 @@ func (m Model) renderNpmDetail(width int, st TabState) string {
 			sectionWidth = min(width, max(maxW+4, 6))
 		}
 
-		hasContent := len(sections) > 0 || info.Description != ""
-		if hasContent {
-			contentLines = append(contentLines, "")
-			contentLines = append(contentLines,
-				lipgloss.NewStyle().Foreground(teal).
-					Render(strings.Repeat("─", max(0, width-4))))
-			contentLines = append(contentLines, "")
-		}
-
 		for _, s := range sections {
 			contentLines = append(contentLines, renderSection(sectionWidth, s.title, s.lines...))
 		}
@@ -800,137 +917,85 @@ func (m Model) renderNpmDetail(width int, st TabState) string {
 			DetailValueStyle.Render("  Loading..."))
 	}
 
+	contentLines = append(contentLines, "")
+	// contentLines = append(contentLines, renderSection(width, "PATH", "Installed by "+origin))
+
 	return renderPaneBox(width, "Details", strings.Join(contentLines, "\n"))
 }
 
-// func (m Model) renderPipDetail(width int, st TabState) string {
-// 	pkgName := st.displayPackages[st.cursor]
-// 	title := DetailTitleStyle.Render("📦 " + pkgName)
-
-// 	var contentLines []string
-// 	contentLines = append(contentLines, title)
-
-// 	if !st.PipDetailsReady {
-// 		contentLines = append(contentLines,
-// 			DetailValueStyle.Render("  Loading registry data..."))
-// 	} else if info, ok := st.PipDetails[pkgName]; ok {
-
-// 		if info.Summary != "" {
-// 			descStyle := lipgloss.NewStyle().
-// 				PaddingLeft(2).
-// 				Foreground(lipgloss.Color("#c0d4e4"))
-// 			contentLines = append(contentLines, descStyle.Render(info.Summary))
-// 		}
-
-// 		type sectionData struct {
-// 			title string
-// 			lines []string
-// 		}
-// 		var sections []sectionData
-// 		var allWidths []int
-
-// 		var pkgPairs [][2]string
-// 		if ver, ok := st.versions[pkgName]; ok {
-// 			pkgPairs = append(pkgPairs, [2]string{"Installed", ver})
-// 		}
-// 		if info.Version != "" {
-// 			pkgPairs = append(pkgPairs, [2]string{"Latest", info.Version})
-// 		}
-// 		if info.HomePage != "" {
-// 			pkgPairs = append(pkgPairs, [2]string{"Homepage", info.HomePage})
-// 		}
-// 		if info.Author != "" {
-// 			authorStr := info.Author
-// 			if info.AuthorEmail != "" {
-// 				authorStr += " <" + info.AuthorEmail + ">"
-// 			}
-// 			pkgPairs = append(pkgPairs, [2]string{"Author", authorStr})
-// 		}
-// 		if len(pkgPairs) > 0 {
-// 			maxLabel := 0
-// 			for _, p := range pkgPairs {
-// 				w := lipgloss.Width(p[0])
-// 				if w > maxLabel {
-// 					maxLabel = w
-// 				}
-// 			}
-// 			var lines []string
-// 			for _, p := range pkgPairs {
-// 				label := lipgloss.NewStyle().Width(maxLabel).Bold(true).Foreground(teal).Render(p[0])
-// 				var value string
-// 				if p[0] == "Homepage" {
-// 					value = LinkStyle.Render(p[1])
-// 				} else {
-// 					value = DetailValueStyle.Render(p[1])
-// 				}
-// 				line := label + "  " + value
-// 				allWidths = append(allWidths, lipgloss.Width(line))
-// 				lines = append(lines, line)
-// 			}
-// 			sections = append(sections, sectionData{"Package", lines})
-// 		}
-
-// 		var metaPairs [][2]string
-// 		if info.License != "" {
-// 			metaPairs = append(metaPairs, [2]string{"License", info.License})
-// 		}
-// 		if len(metaPairs) > 0 {
-// 			maxLabel := 0
-// 			for _, p := range metaPairs {
-// 				w := lipgloss.Width(p[0])
-// 				if w > maxLabel {
-// 					maxLabel = w
-// 				}
-// 			}
-// 			var lines []string
-// 			for _, p := range metaPairs {
-// 				label := lipgloss.NewStyle().Width(maxLabel).Bold(true).Foreground(teal).Render(p[0])
-// 				value := DetailValueStyle.Render(p[1])
-// 				line := label + "  " + value
-// 				allWidths = append(allWidths, lipgloss.Width(line))
-// 				lines = append(lines, line)
-// 			}
-// 			sections = append(sections, sectionData{"Metadata", lines})
-// 		}
-
-// 		sectionWidth := width
-// 		if len(allWidths) > 0 {
-// 			maxW := 0
-// 			for _, w := range allWidths {
-// 				if w > maxW {
-// 					maxW = w
-// 				}
-// 			}
-// 			sectionWidth = min(width, max(maxW+4, 6))
-// 		}
-
-// 		hasContent := len(sections) > 0 || info.Summary != ""
-// 		if hasContent {
-// 			contentLines = append(contentLines, "")
-// 			contentLines = append(contentLines,
-// 				lipgloss.NewStyle().Foreground(teal).
-// 					Render(strings.Repeat("─", max(0, width-4))))
-// 			contentLines = append(contentLines, "")
-// 		}
-
-// 		for _, s := range sections {
-// 			contentLines = append(contentLines, renderSection(sectionWidth, s.title, s.lines...))
-// 		}
-// 	} else {
-// 		contentLines = append(contentLines,
-// 			DetailValueStyle.Render("  Loading..."))
-// 	}
-
-// 	return renderPaneBox(width, "Details", strings.Join(contentLines, "\n"))
-// }
-
 func (m Model) renderFooter() string {
+	total := m.totalPackages()
+	countStr := ResultStyle.Render(fmt.Sprintf("%d results across all package managers", total))
+
 	apiErrMsg := ""
-	if st := m.states[m.activeTab]; st.Brew != nil && st.Brew.APIErr != nil {
-		apiErrMsg += "  " + ErrorStyle.Render("API unavailable")
+	for i := range m.states {
+		if m.states[i].Brew != nil && m.states[i].Brew.APIErr != nil {
+			apiErrMsg = "  " + ErrorStyle.Render("API unavailable")
+			break
+		}
 	}
-	help := FooterStyle.Render("← → tabs  •  / search  •  ↑↓ navigate  •  q quit")
-	return apiErrMsg + "  " + help
+
+	themeName := ""
+	if currentTheme != nil {
+		themeName = currentTheme.Name
+	}
+	help := FooterStyle.Render(
+		fmt.Sprintf("[← → tabs]  [/ search]  [↑↓ navigate]  [t theme  %s]  [q quit]", themeName),
+	)
+	return countStr + apiErrMsg + "  " + help
+}
+
+func (m Model) renderThemeOverlay() string {
+	boxW := min(52, m.width-6)
+	innerW := boxW - 4
+
+	border := lipgloss.NewStyle().Foreground(currentTheme.Primary)
+
+	titleText := lipgloss.NewStyle().Bold(true).Foreground(currentTheme.Primary).Render(" Choose Theme ")
+	dashLen := max(0, boxW-4-lipgloss.Width(titleText))
+	titleLine := border.Render("╭─"+strings.Repeat("─", dashLen/2)) + titleText +
+		border.Render(strings.Repeat("─", dashLen-dashLen/2)+"─╮")
+
+	nameColW := 14
+	descColW := innerW - nameColW - 3
+
+	var items []string
+	for i, t := range themes {
+		name := lipgloss.NewStyle().Width(nameColW).Render(t.Name)
+		desc := t.Description
+		if len(desc) > descColW {
+			desc = desc[:descColW]
+		}
+
+		var line string
+		if i == m.themeCursor {
+			arrow := lipgloss.NewStyle().Foreground(currentTheme.Primary).Render("›")
+			nameStyled := lipgloss.NewStyle().Bold(true).Foreground(currentTheme.Text).Render(name)
+			descStyled := lipgloss.NewStyle().Foreground(currentTheme.Primary).Render(desc)
+			line = fmt.Sprintf("  %s %s %s", arrow, nameStyled, descStyled)
+		} else {
+			nameStyled := lipgloss.NewStyle().Bold(true).Foreground(currentTheme.Text).Render(name)
+			descStyled := lipgloss.NewStyle().Foreground(currentTheme.DimText).Render(desc)
+			line = fmt.Sprintf("   %s %s", nameStyled, descStyled)
+		}
+		padded := lipgloss.NewStyle().Width(innerW).Render(line)
+		items = append(items, border.Render("│ ")+padded+border.Render(" │"))
+	}
+	content := strings.Join(items, "\n")
+
+	bottom := border.Render("╰" + strings.Repeat("─", boxW-2) + "╯")
+	footer := lipgloss.NewStyle().
+		Foreground(currentTheme.DimText).
+		Italic(true).
+		Render("  ↑↓ navigate · enter select · esc close")
+
+	overlay := strings.Join([]string{titleLine, content, bottom, footer}, "\n")
+
+	return lipgloss.Place(
+		m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		overlay,
+	)
 }
 
 func (m Model) listViewFallback() string {
@@ -938,9 +1003,9 @@ func (m Model) listViewFallback() string {
 	title := TitleStyle.Render(fmt.Sprintf("pkgui  (%d)", len(st.packages)))
 
 	sep := lipgloss.NewStyle().
-		Foreground(teal).
+		Foreground(currentTheme.Primary).
 		Padding(0, 1).
-		Render(strings.Repeat("─", m.width-8))
+		Render(strings.Repeat("━", m.width-8))
 
 	var list string
 	visibleHeight := m.height - 8
@@ -957,9 +1022,9 @@ func (m Model) listViewFallback() string {
 	for i := start; i < end; i++ {
 		pkg := st.displayPackages[i]
 		if i == st.cursor {
-			list += SelectedItemStyle.Render("▸ "+pkg) + "\n"
+			list += SelectedItemStyle.Render(pkg) + "\n"
 		} else {
-			list += ItemStyle.Render("  "+pkg) + "\n"
+			list += ItemStyle.Render(pkg) + "\n"
 		}
 	}
 
@@ -968,8 +1033,8 @@ func (m Model) listViewFallback() string {
 }
 
 func renderSection(maxWidth int, title string, lines ...string) string {
-	amberStyle := lipgloss.NewStyle().Bold(true).Foreground(amber)
-	border := lipgloss.NewStyle().Foreground(teal)
+	violetStyle := lipgloss.NewStyle().Bold(true).Foreground(currentTheme.Primary)
+	border := lipgloss.NewStyle().Foreground(currentTheme.Primary)
 
 	maxContent := 0
 	for _, line := range lines {
@@ -983,38 +1048,65 @@ func renderSection(maxWidth int, title string, lines ...string) string {
 
 	inner := boxWidth - 4
 
-	top := border.Render("╭─ ") +
-		amberStyle.Render(title) +
-		border.Render(" "+strings.Repeat("─", max(0, boxWidth-5-lipgloss.Width(title)))+"╮")
+	top := border.Render("┏━ ") +
+		violetStyle.Render(title) +
+		border.Render(" "+strings.Repeat("━", max(0, boxWidth-5-lipgloss.Width(title)))+"┓")
 
 	var body []string
 	for _, line := range lines {
 		padded := lipgloss.NewStyle().Width(inner).Render(line)
-		body = append(body, border.Render("│ ")+padded+border.Render(" │"))
+		body = append(body, border.Render("┃ ")+padded+border.Render(" ┃"))
 	}
 
-	bottom := border.Render("╰" + strings.Repeat("─", boxWidth-2) + "╯")
+	bottom := border.Render("┗" + strings.Repeat("━", boxWidth-2) + "┛")
 
 	return strings.Join(append([]string{top}, append(body, bottom)...), "\n")
 }
 
 func renderPaneBox(width int, title string, content string) string {
-	amberStyle := lipgloss.NewStyle().Bold(true).Foreground(amber)
-	border := lipgloss.NewStyle().Foreground(teal)
+	violetStyle := lipgloss.NewStyle().Bold(true).Foreground(currentTheme.Primary)
+	border := lipgloss.NewStyle().Foreground(currentTheme.Primary)
 
-	top := border.Render("╭─ ") +
-		amberStyle.Render(title) +
-		border.Render(" "+strings.Repeat("─", max(0, width-5-lipgloss.Width(title)))+"╮")
+	top := border.Render("┏━ ") +
+		violetStyle.Render(title) +
+		border.Render(" "+strings.Repeat("━", max(0, width-5-lipgloss.Width(title)))+"┓")
 
 	inner := width - 4
 	lines := strings.Split(content, "\n")
 	var body []string
 	for _, line := range lines {
 		padded := lipgloss.NewStyle().Width(inner).Render(line)
-		body = append(body, border.Render("│ ")+padded+border.Render(" │"))
+		body = append(body, border.Render("┃ ")+padded+border.Render(" ┃"))
 	}
 
-	bottom := border.Render("╰" + strings.Repeat("─", width-2) + "╯")
+	bottom := border.Render("┗" + strings.Repeat("━", width-2) + "┛")
 
 	return strings.Join(append([]string{top}, append(body, bottom)...), "\n")
+}
+
+func humanSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
