@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -22,9 +23,17 @@ func (m Model) renderTabBar(width int) string {
 		Render(" ")
 
 	var cells []string
+
+	allLabel := fmt.Sprintf("ALL (%d)", len(m.allPackages))
+	if m.allMode {
+		cells = append(cells, activeStyle.Render(allLabel))
+	} else {
+		cells = append(cells, inactiveStyle.Render(allLabel))
+	}
+
 	for i, tab := range m.tabs {
 		label := strings.ToUpper(tab.TabLabel())
-		if i == m.activeTab {
+		if !m.allMode && i == m.activeTab {
 			cells = append(cells, activeStyle.Render(label))
 		} else {
 			cells = append(cells, inactiveStyle.Render(label))

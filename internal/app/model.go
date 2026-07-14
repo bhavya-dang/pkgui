@@ -2,6 +2,8 @@ package app
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +39,8 @@ type TabState struct {
 	Brew            *BrewState
 	NpmDetails      map[string]*pm.NpmDetailData
 	NpmDetailsReady bool
+	PipDetails      map[string]*pm.PipDetailData
+	PipDetailsReady bool
 	DetailErr       error
 }
 
@@ -61,6 +65,12 @@ type Model struct {
 	spinner    spinner.Model
 	spinnerCmd tea.Cmd
 
+	allMode            bool
+	allPackages        []string
+	allDisplayPackages []string
+	allCursor          int
+	allPackageOrigin   map[string]string
+
 	themeOverlay bool
 	themeCursor  int
 
@@ -77,6 +87,7 @@ func New() Model {
 	managers := []pm.Manager{
 		pm.NewBrewManager(0),
 		pm.NewNpmManager(1),
+		pm.NewPipManager(2),
 	}
 	states := make([]TabState, len(managers))
 	for i, m := range managers {
@@ -93,11 +104,13 @@ func New() Model {
 		}
 	}
 	return Model{
+		allMode:          true,
 		activeTab:        0,
 		tabs:             managers,
 		states:           states,
 		spinner:          s,
 		sparklineHistory: make([]float64, 0, 40),
+		allPackageOrigin: make(map[string]string),
 	}
 }
 
@@ -121,7 +134,48 @@ func fuzzyMatch(s, query string) bool {
 	return qi == len(q)
 }
 
+func darkenHex(hex string, factor float64) lipgloss.Color {
+	h := strings.TrimPrefix(hex, "#")
+	if len(h) != 6 {
+		return lipgloss.Color(hex)
+	}
+	r, _ := strconv.ParseUint(h[0:2], 16, 8)
+	g, _ := strconv.ParseUint(h[2:4], 16, 8)
+	b, _ := strconv.ParseUint(h[4:6], 16, 8)
+	nr := int(float64(r) * (1 - factor))
+	ng := int(float64(g) * (1 - factor))
+	nb := int(float64(b) * (1 - factor))
+	if nr < 0 {
+		nr = 0
+	}
+	if ng < 0 {
+		ng = 0
+	}
+	if nb < 0 {
+		nb = 0
+	}
+	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", nr, ng, nb))
+}
+
 func (m Model) applyFilter() Model {
+	if m.allMode {
+		if m.searchQuery == "" {
+			m.allDisplayPackages = m.allPackages
+		} else {
+			query := strings.ToLower(m.searchQuery)
+			var filtered []string
+			for _, pkg := range m.allPackages {
+				if fuzzyMatch(pkg, query) {
+					filtered = append(filtered, pkg)
+				}
+			}
+			m.allDisplayPackages = filtered
+		}
+		if m.allCursor >= len(m.allDisplayPackages) {
+			m.allCursor = max(0, len(m.allDisplayPackages)-1)
+		}
+		return m
+	}
 	st := &m.states[m.activeTab]
 	if m.searchQuery == "" {
 		st.displayPackages = st.packages
@@ -145,6 +199,9 @@ func (m Model) applyFilter() Model {
 }
 
 func (m Model) updateBrewInfo() Model {
+	if m.allMode {
+		return m
+	}
 	st := &m.states[m.activeTab]
 	if st.Brew == nil {
 		return m
@@ -161,6 +218,9 @@ func (m Model) updateBrewInfo() Model {
 }
 
 func (m Model) selectPackageCmd() tea.Cmd {
+	if m.allMode {
+		return nil
+	}
 	st := &m.states[m.activeTab]
 	if st.Brew != nil {
 		m = m.updateBrewInfo()
@@ -174,6 +234,29 @@ func (m Model) totalPackages() int {
 		total += len(m.states[i].displayPackages)
 	}
 	return total
+}
+
+func (m Model) buildAllPackages() Model {
+	m.allPackages = nil
+	m.allPackageOrigin = make(map[string]string)
+	pmNames := make(map[int]string)
+	for i, t := range m.tabs {
+		pmNames[i] = t.Name()
+	}
+	for i, st := range m.states {
+		for _, pkg := range st.packages {
+			if _, exists := m.allPackageOrigin[pkg]; !exists {
+				m.allPackages = append(m.allPackages, pkg)
+			}
+			m.allPackageOrigin[pkg] = pmNames[i]
+		}
+	}
+	sort.Strings(m.allPackages)
+	m.allDisplayPackages = m.allPackages
+	if m.allCursor >= len(m.allDisplayPackages) {
+		m.allCursor = max(0, len(m.allDisplayPackages)-1)
+	}
+	return m
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -195,12 +278,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			st.loading = false
 			tab := m.tabs[msg.TabIndex]
 			if tab.Name() == "npm" {
+				m = m.buildAllPackages()
 				return m, pm.FetchAllNpmDetails(msg.Packages)
+			}
+			if tab.Name() == "pip" {
+				m = m.buildAllPackages()
+				return m, pm.FetchAllPipDetails(msg.Packages)
 			}
 		}
 		st.progressTarget = 1.0
 		st.progress = 1.0
 		m.updateSparkline()
+		m = m.buildAllPackages()
 
 	case pm.BrewListMsg:
 		st := &m.states[0]
@@ -219,6 +308,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m = m.updateBrewInfo()
 			}
 			m.updateSparkline()
+			m = m.buildAllPackages()
 		}
 
 	case pm.BrewErrMsg:
@@ -268,6 +358,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		st.NpmDetailsReady = true
+
+	case pm.PipAllDetailsMsg:
+		st := &m.states[2]
+		if st.PipDetails == nil {
+			st.PipDetails = map[string]*pm.PipDetailData(msg)
+		} else {
+			for k, v := range msg {
+				st.PipDetails[k] = v
+			}
+		}
+		st.PipDetailsReady = true
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -341,17 +442,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "up":
-				st := &m.states[m.activeTab]
-				if st.cursor > 0 {
-					st.cursor--
-					return m, m.selectPackageCmd()
+				if m.allMode {
+					if m.allCursor > 0 {
+						m.allCursor--
+					}
+				} else {
+					st := &m.states[m.activeTab]
+					if st.cursor > 0 {
+						st.cursor--
+						return m, m.selectPackageCmd()
+					}
 				}
 				return m, nil
 			case "down":
-				st := &m.states[m.activeTab]
-				if st.cursor < len(st.displayPackages)-1 {
-					st.cursor++
-					return m, m.selectPackageCmd()
+				if m.allMode {
+					if m.allCursor < len(m.allDisplayPackages)-1 {
+						m.allCursor++
+					}
+				} else {
+					st := &m.states[m.activeTab]
+					if st.cursor < len(st.displayPackages)-1 {
+						st.cursor++
+						return m, m.selectPackageCmd()
+					}
 				}
 				return m, nil
 			default:
@@ -385,6 +498,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searchQuery = ""
 
 		case "left":
+			if m.allMode {
+				return m, nil
+			}
 			if m.activeTab > 0 {
 				m.activeTab--
 				m.searchActive = false
@@ -395,8 +511,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, m.selectPackageCmd()
 			}
+			if m.activeTab == 0 {
+				m.allMode = true
+				m.searchActive = false
+				m.searchQuery = ""
+				return m, nil
+			}
 
 		case "right":
+			if m.allMode {
+				m.allMode = false
+				m.activeTab = 0
+				m.searchActive = false
+				m.searchQuery = ""
+				return m, m.selectPackageCmd()
+			}
 			if m.activeTab < len(m.tabs)-1 {
 				m.activeTab++
 				m.searchActive = false
@@ -409,17 +538,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "up":
-			st := &m.states[m.activeTab]
-			if st.cursor > 0 {
-				st.cursor--
-				return m, m.selectPackageCmd()
+			if m.allMode {
+				if m.allCursor > 0 {
+					m.allCursor--
+				}
+			} else {
+				st := &m.states[m.activeTab]
+				if st.cursor > 0 {
+					st.cursor--
+					return m, m.selectPackageCmd()
+				}
 			}
 
 		case "down":
-			st := &m.states[m.activeTab]
-			if st.cursor < len(st.displayPackages)-1 {
-				st.cursor++
-				return m, m.selectPackageCmd()
+			if m.allMode {
+				if m.allCursor < len(m.allDisplayPackages)-1 {
+					m.allCursor++
+				}
+			} else {
+				st := &m.states[m.activeTab]
+				if st.cursor < len(st.displayPackages)-1 {
+					st.cursor++
+					return m, m.selectPackageCmd()
+				}
 			}
 		}
 	}
@@ -476,9 +617,11 @@ func (m Model) View() string {
 		return m.renderLoading()
 	}
 
-	st := m.states[m.activeTab]
-	if st.err != nil {
-		return ErrorStyle.Render(fmt.Sprintf("Error: %v", st.err))
+	if !m.allMode {
+		st := m.states[m.activeTab]
+		if st.err != nil {
+			return ErrorStyle.Render(fmt.Sprintf("Error: %v", st.err))
+		}
 	}
 
 	if m.width < 60 {
@@ -634,6 +777,9 @@ func (m Model) renderSearchBar(width int, focused bool) string {
 }
 
 func (m Model) renderLeftPanel(width int, boxHeight int) string {
+	if m.allMode {
+		return m.renderAllLeftPanel(width, boxHeight)
+	}
 	st := m.states[m.activeTab]
 	visibleHeight := boxHeight - 2
 	innerWidth := width - 4
@@ -662,7 +808,94 @@ func (m Model) renderLeftPanel(width int, boxHeight int) string {
 	return renderPaneBox(width, boxTitle, strings.Join(listItems, "\n"))
 }
 
+func (m Model) renderAllLeftPanel(width int, boxHeight int) string {
+	visibleHeight := boxHeight - 2
+
+	start := 0
+	if m.allCursor >= visibleHeight {
+		start = m.allCursor - visibleHeight + 1
+	}
+	end := start + visibleHeight
+	if end > len(m.allDisplayPackages) {
+		end = len(m.allDisplayPackages)
+	}
+
+	typeWidth := 5
+
+	pmBadge := func(name string) lipgloss.Style {
+		switch name {
+		case "brew":
+			return lipgloss.NewStyle().
+				Width(typeWidth).
+				Background(currentTheme.Primary).
+				Foreground(currentTheme.SelectedFg)
+		case "npm":
+			return lipgloss.NewStyle().
+				Width(typeWidth).
+				Background(darkenHex(string(currentTheme.Primary), 0.65)).
+				Foreground(currentTheme.Text)
+		case "pip":
+			return lipgloss.NewStyle().
+				Width(typeWidth).
+				Background(darkenHex(string(currentTheme.Success), 0.65)).
+				Foreground(currentTheme.Text)
+		default:
+			return lipgloss.NewStyle().
+				Width(typeWidth).
+				Background(currentTheme.Muted).
+				Foreground(currentTheme.Text)
+		}
+	}
+
+	var listItems []string
+	for i := start; i < end; i++ {
+		pkg := m.allDisplayPackages[i]
+		origin := m.allPackageOrigin[pkg]
+
+		originRendered := pmBadge(origin).Render(origin)
+		var pkgRendered string
+		if i == m.allCursor {
+			pkgRendered = SelectedItemStyle.Render(pkg)
+		} else {
+			pkgRendered = ItemStyle.Render(pkg)
+		}
+
+		listItems = append(listItems, originRendered+" "+pkgRendered)
+	}
+
+	boxTitle := fmt.Sprintf("All Packages (%d)", len(m.allDisplayPackages))
+
+	badgeLabel := "PM"
+	violetStyle := lipgloss.NewStyle().Bold(true).Foreground(currentTheme.Primary)
+	border := lipgloss.NewStyle().Foreground(currentTheme.Primary)
+	content := strings.Join(listItems, "\n")
+
+	w1 := lipgloss.Width(badgeLabel)
+	w2 := lipgloss.Width(boxTitle)
+	n := max(0, width-9-w1-w2)
+	top := border.Render("┏━ ") +
+		violetStyle.Render(badgeLabel) +
+		border.Render(" ━━ ") +
+		violetStyle.Render(boxTitle) +
+		border.Render(" "+strings.Repeat("━", n)+"┓")
+
+	inner := width - 4
+	lines := strings.Split(content, "\n")
+	var body []string
+	for _, line := range lines {
+		padded := lipgloss.NewStyle().Width(inner).Render(line)
+		body = append(body, border.Render("┃ ")+padded+border.Render(" ┃"))
+	}
+
+	bottom := border.Render("┗" + strings.Repeat("━", width-2) + "┛")
+
+	return strings.Join(append([]string{top}, append(body, bottom)...), "\n")
+}
+
 func (m Model) renderRightPanel(width int) string {
+	if m.allMode {
+		return m.renderAllDetail(width)
+	}
 	st := m.states[m.activeTab]
 
 	if len(st.displayPackages) == 0 {
@@ -676,8 +909,64 @@ func (m Model) renderRightPanel(width int) string {
 	if m.tabs[m.activeTab].Name() == "npm" {
 		return m.renderNpmDetail(width, st)
 	}
+	if m.tabs[m.activeTab].Name() == "pip" {
+		return m.renderPipDetail(width, st)
+	}
 	return renderPaneBox(width, "Details",
 		lipgloss.NewStyle().PaddingLeft(2).Foreground(currentTheme.DetailText).Render("Details coming soon for this package manager"))
+}
+
+func (m Model) renderAllDetail(width int) string {
+	if len(m.allDisplayPackages) == 0 {
+		return renderPaneBox(width, "Details",
+			lipgloss.NewStyle().PaddingLeft(2).Foreground(currentTheme.DetailText).Render("No packages match your query"))
+	}
+	pkgName := m.allDisplayPackages[m.allCursor]
+	origin := m.allPackageOrigin[pkgName]
+
+	originIdx := -1
+	for i, t := range m.tabs {
+		if t.Name() == origin {
+			originIdx = i
+			break
+		}
+	}
+	if originIdx == -1 {
+		return renderPaneBox(width, "Details",
+			lipgloss.NewStyle().PaddingLeft(2).Foreground(currentTheme.DetailText).Render("Unknown package origin"))
+	}
+
+	st := m.states[originIdx]
+
+	cursor := -1
+	for i, p := range st.displayPackages {
+		if p == pkgName {
+			cursor = i
+			break
+		}
+	}
+	if cursor == -1 {
+		return renderPaneBox(width, "Details",
+			lipgloss.NewStyle().PaddingLeft(2).Foreground(currentTheme.DetailText).Render("Package details loading..."))
+	}
+
+	if st.Brew != nil {
+		localSt := st
+		localSt.cursor = cursor
+		if f, ok := localSt.Brew.FormulaeMap[pkgName]; ok {
+			localSt.Brew.Info = &f
+		} else {
+			localSt.Brew.Info = nil
+		}
+		return m.renderBrewDetail(width, localSt)
+	}
+
+	localSt := st
+	localSt.cursor = cursor
+	if origin == "pip" {
+		return m.renderPipDetail(width, localSt)
+	}
+	return m.renderNpmDetail(width, localSt)
 }
 
 func (m Model) renderBrewDetail(width int, st TabState) string {
@@ -923,6 +1212,114 @@ func (m Model) renderNpmDetail(width int, st TabState) string {
 	return renderPaneBox(width, "Details", strings.Join(contentLines, "\n"))
 }
 
+func (m Model) renderPipDetail(width int, st TabState) string {
+	pkgName := st.displayPackages[st.cursor]
+
+	var contentLines []string
+	contentLines = append(contentLines, "")
+	contentLines = append(contentLines, DetailTitleStyle.Render("📦 "+pkgName))
+	contentLines = append(contentLines, "")
+
+	if !st.PipDetailsReady {
+		contentLines = append(contentLines,
+			DetailValueStyle.Render("  Loading registry data..."))
+	} else if info, ok := st.PipDetails[pkgName]; ok {
+
+		if info.Summary != "" {
+			contentLines = append(contentLines, renderSection(width, "Description", info.Summary))
+			contentLines = append(contentLines, "")
+		}
+
+		type sectionData struct {
+			title string
+			lines []string
+		}
+		var sections []sectionData
+		var allWidths []int
+
+		var pkgPairs [][2]string
+		if ver, ok := st.versions[pkgName]; ok {
+			pkgPairs = append(pkgPairs, [2]string{"Installed", ver})
+		}
+		if info.Version != "" {
+			pkgPairs = append(pkgPairs, [2]string{"Latest", info.Version})
+		}
+		if len(pkgPairs) > 0 {
+			maxLabel := 0
+			for _, p := range pkgPairs {
+				w := lipgloss.Width(p[0])
+				if w > maxLabel {
+					maxLabel = w
+				}
+			}
+			var lines []string
+			for _, p := range pkgPairs {
+				label := lipgloss.NewStyle().Width(maxLabel).Bold(true).Foreground(currentTheme.Primary).Render(p[0])
+				value := DetailValueStyle.Render(p[1])
+				line := label + "  " + value
+				allWidths = append(allWidths, lipgloss.Width(line))
+				lines = append(lines, line)
+			}
+			sections = append(sections, sectionData{"Package", lines})
+		}
+
+		var metaPairs [][2]string
+		if info.License != "" {
+			metaPairs = append(metaPairs, [2]string{"License", info.License})
+		}
+		if info.HomePage != "" {
+			metaPairs = append(metaPairs, [2]string{"Homepage", info.HomePage})
+		}
+		if info.Author != "" {
+			metaPairs = append(metaPairs, [2]string{"Author", info.Author})
+		}
+		if len(metaPairs) > 0 {
+			maxLabel := 0
+			for _, p := range metaPairs {
+				w := lipgloss.Width(p[0])
+				if w > maxLabel {
+					maxLabel = w
+				}
+			}
+			var lines []string
+			for _, p := range metaPairs {
+				label := lipgloss.NewStyle().Width(maxLabel).Bold(true).Foreground(currentTheme.Primary).Render(p[0])
+				var value string
+				if p[0] == "Homepage" {
+					value = LinkStyle.Render(p[1])
+				} else {
+					value = DetailValueStyle.Render(p[1])
+				}
+				line := label + "  " + value
+				allWidths = append(allWidths, lipgloss.Width(line))
+				lines = append(lines, line)
+			}
+			sections = append(sections, sectionData{"Metadata", lines})
+		}
+
+		sectionWidth := width
+		if len(allWidths) > 0 {
+			maxW := 0
+			for _, w := range allWidths {
+				if w > maxW {
+					maxW = w
+				}
+			}
+			sectionWidth = min(width, max(maxW+4, 6))
+		}
+
+		for _, s := range sections {
+			contentLines = append(contentLines, renderSection(sectionWidth, s.title, s.lines...))
+		}
+	} else {
+		contentLines = append(contentLines,
+			DetailValueStyle.Render("  Loading..."))
+	}
+
+	contentLines = append(contentLines, "")
+	return renderPaneBox(width, "Details", strings.Join(contentLines, "\n"))
+}
+
 func (m Model) renderFooter() string {
 	total := m.totalPackages()
 	countStr := ResultStyle.Render(fmt.Sprintf("%d results across all package managers", total))
@@ -999,34 +1396,81 @@ func (m Model) renderThemeOverlay() string {
 }
 
 func (m Model) listViewFallback() string {
-	st := m.states[m.activeTab]
-	title := TitleStyle.Render(fmt.Sprintf("pkgui  (%d)", len(st.packages)))
+	var title string
+	var list string
+	visibleHeight := m.height - 8
+
+	if m.allMode {
+		title = TitleStyle.Render(fmt.Sprintf("pkgui  (%d)", len(m.allPackages)))
+		start := 0
+		if m.allCursor >= visibleHeight {
+			start = m.allCursor - visibleHeight + 1
+		}
+		end := start + visibleHeight
+		if end > len(m.allDisplayPackages) {
+			end = len(m.allDisplayPackages)
+		}
+		pmBadgeFn := func(name string) lipgloss.Style {
+			switch name {
+			case "brew":
+				return lipgloss.NewStyle().
+					Width(5).
+					Background(currentTheme.Primary).
+					Foreground(currentTheme.SelectedFg)
+			case "npm":
+				return lipgloss.NewStyle().
+					Width(5).
+					Background(darkenHex(string(currentTheme.Primary), 0.65)).
+					Foreground(currentTheme.Text)
+			case "pip":
+				return lipgloss.NewStyle().
+					Width(5).
+					Background(darkenHex(string(currentTheme.Success), 0.65)).
+					Foreground(currentTheme.Text)
+			default:
+				return lipgloss.NewStyle().
+					Width(5).
+					Background(currentTheme.Muted).
+					Foreground(currentTheme.Text)
+			}
+		}
+		for i := start; i < end; i++ {
+			pkg := m.allDisplayPackages[i]
+			origin := m.allPackageOrigin[pkg]
+			originRendered := pmBadgeFn(origin).Render(origin)
+			var pkgRendered string
+			if i == m.allCursor {
+				pkgRendered = SelectedItemStyle.Render(pkg)
+			} else {
+				pkgRendered = ItemStyle.Render(pkg)
+			}
+			list += originRendered + " " + pkgRendered + "\n"
+		}
+	} else {
+		st := m.states[m.activeTab]
+		title = TitleStyle.Render(fmt.Sprintf("pkgui  (%d)", len(st.packages)))
+		start := 0
+		if st.cursor >= visibleHeight {
+			start = st.cursor - visibleHeight + 1
+		}
+		end := start + visibleHeight
+		if end > len(st.displayPackages) {
+			end = len(st.displayPackages)
+		}
+		for i := start; i < end; i++ {
+			pkg := st.displayPackages[i]
+			if i == st.cursor {
+				list += SelectedItemStyle.Render(pkg) + "\n"
+			} else {
+				list += ItemStyle.Render(pkg) + "\n"
+			}
+		}
+	}
 
 	sep := lipgloss.NewStyle().
 		Foreground(currentTheme.Primary).
 		Padding(0, 1).
 		Render(strings.Repeat("━", m.width-8))
-
-	var list string
-	visibleHeight := m.height - 8
-
-	start := 0
-	if st.cursor >= visibleHeight {
-		start = st.cursor - visibleHeight + 1
-	}
-	end := start + visibleHeight
-	if end > len(st.displayPackages) {
-		end = len(st.displayPackages)
-	}
-
-	for i := start; i < end; i++ {
-		pkg := st.displayPackages[i]
-		if i == st.cursor {
-			list += SelectedItemStyle.Render(pkg) + "\n"
-		} else {
-			list += ItemStyle.Render(pkg) + "\n"
-		}
-	}
 
 	body := lipgloss.JoinVertical(lipgloss.Left, title, sep, list)
 	return docStyle.Render(body)
