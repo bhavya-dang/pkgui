@@ -1,14 +1,22 @@
-# pkgui
+<p align="center">
+  <h1 align="center">pkgui</h1>
+  <p align="center">A terminal UI for browsing packages across multiple package managers.</p>
 
-A terminal UI for managing packages across multiple package managers.
+  <p align="center">
+    <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go version"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT license"></a>
+    <a href="https://github.com/bhavya-dang/pkgui/releases"><img src="https://img.shields.io/github/v/release/bhavya-dang/pkgui?style=for-the-badge&logo=github&logoColor=white&label=release" alt="Release"></a>
+    <a href="https://github.com/bhavya-dang/pkgui/stargazers"><img src="https://img.shields.io/github/stars/bhavya-dang/pkgui?style=for-the-badge&logo=github&logoColor=white&label=stars" alt="Stars"></a>
+  </p>
 
-> Written in Go using [Bubble Tea](https://github.com/charmbracelet/bubbletea)
+  <p align="center">
+    <i>Built with <a href="https://github.com/charmbracelet/bubbletea">Bubble Tea</a></i>
+  </p>
 
-<br/>
-
-![demo 1](./preview/demo.gif)
-
-<!--![demo 2](./preview/6.png)-->
+  <p align="center">
+    <img src="./preview/demo1.gif" alt="demo" width="720">
+  </p>
+</p>
 
 ## Features
 
@@ -31,21 +39,22 @@ A terminal UI for managing packages across multiple package managers.
 - [x] installed formulae
 - [ ] installed casks/taps ([#29](https://github.com/bhavya-dang/pkgui/issues/29))
 - [x] installed npm packages
-- [ ] installed pip packages ([#20](https://github.com/bhavya-dang/pkgui/issues/20))
+- [/] installed pip packages ([#20](https://github.com/bhavya-dang/pkgui/issues/20))
+  - [x] globally installed packages
 - [ ] upgrade/remove packages ([#3](https://github.com/bhavya-dang/pkgui/issues/3))
 - [ ] search packages ([#19](https://github.com/bhavya-dang/pkgui/issues/19))
 - [x] multi-theme support ([#9](https://github.com/bhavya-dang/pkgui/issues/9))
 - [ ] persist user configuration ([#27](https://github.com/bhavya-dang/pkgui/issues/27))
+- [x] list packages across all PMs in one list
 
 ## Currently Supported PMs
 
 - **Homebrew** (formulae)
 - **npm**
+- **pip** (global packages)
 
 ## Prerequisites
 
-- [Homebrew](https://brew.sh)
-- [npm](https://www.npmjs.com/)
 - Go 1.25+ (if building from source)
 
 ## Installation
@@ -102,6 +111,8 @@ pkgui
   - installed formulae (with detail view from the Homebrew API)
 - npm
   - installed packages
+- pip
+  - globally installed packages
 
 ## License
 
@@ -109,5 +120,4 @@ MIT
 
 ## Contributions
 
-I am actively working on this project. Feel free to raise any issues you find.
-If you want to contribute something, let me know or raise an issue, fork the repo, and start contributing!
+This is an open-source project. Feel free to raise any issues you find or contribute something.
