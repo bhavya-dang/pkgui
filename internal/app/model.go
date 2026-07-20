@@ -24,6 +24,20 @@ type BrewState struct {
 	Sizes             map[string]int64
 	BrewListDone      bool
 	BrewFormulaeDone  bool
+
+	FormulaNames []string
+	Casks        map[string]string
+	CaskNames    []string
+	CaskPaths    map[string]string
+	CaskSizes    map[string]int64
+	CaskData     map[string]*pm.CaskData
+	CaskDataReady bool
+	CaskListDone  bool
+
+	Taps        []string
+	TapFormulae map[string][]string
+	TapListDone bool
+	TapFetched  bool
 }
 
 type TabState struct {
@@ -35,6 +49,7 @@ type TabState struct {
 	progress        float64
 	progressTarget  float64
 	versions        map[string]string
+	packageType     map[string]string
 
 	Brew            *BrewState
 	NpmDetails      map[string]*pm.NpmDetailData
@@ -78,10 +93,18 @@ type Model struct {
 }
 
 func New() Model {
-	applyTheme(themes[0])
+	cfg := loadConfig()
+	themeIdx := 0
+	for i, t := range themes {
+		if t.Name == cfg.Theme {
+			themeIdx = i
+			break
+		}
+	}
+	applyTheme(themes[themeIdx])
 
 	s := spinner.New()
-	s.Style = lipgloss.NewStyle().Foreground(themes[0].Primary)
+	s.Style = lipgloss.NewStyle().Foreground(themes[themeIdx].Primary)
 	s.Spinner = spinner.MiniDot
 
 	managers := []pm.Manager{
@@ -93,11 +116,12 @@ func New() Model {
 	for i, m := range managers {
 		target := 0.7
 		if m.Name() == "brew" {
-			target = 0.35
+			target = 0.25
 		}
 		states[i] = TabState{
 			loading:        true,
 			progressTarget: target,
+			packageType:    make(map[string]string),
 		}
 		if m.Name() == "brew" {
 			states[i].Brew = &BrewState{}
@@ -208,7 +232,9 @@ func (m Model) updateBrewInfo() Model {
 	}
 	if len(st.displayPackages) > 0 && st.cursor < len(st.displayPackages) {
 		name := st.displayPackages[st.cursor]
-		if f, ok := st.Brew.FormulaeMap[name]; ok {
+		if pkgType, ok := st.packageType[name]; ok && pkgType != "formula" {
+			st.Brew.Info = nil
+		} else if f, ok := st.Brew.FormulaeMap[name]; ok {
 			st.Brew.Info = &f
 		} else {
 			st.Brew.Info = nil
@@ -217,15 +243,98 @@ func (m Model) updateBrewInfo() Model {
 	return m
 }
 
-func (m Model) selectPackageCmd() tea.Cmd {
-	if m.allMode {
+func (m Model) maybeFetchBrewDetailData() tea.Cmd {
+	if !m.allLoaded() {
 		return nil
 	}
+	if m.allMode {
+		if m.allCursor >= len(m.allDisplayPackages) {
+			return nil
+		}
+		pkgName := m.allDisplayPackages[m.allCursor]
+		if m.allPackageOrigin[pkgName] != "brew" {
+			return nil
+		}
+	} else if m.activeTab != 0 {
+		return nil
+	}
+	st := &m.states[0]
+	if st.Brew == nil {
+		return nil
+	}
+	var pkgName string
+	if m.allMode {
+		pkgName = m.allDisplayPackages[m.allCursor]
+	} else {
+		if st.cursor >= len(st.displayPackages) {
+			return nil
+		}
+		pkgName = st.displayPackages[st.cursor]
+	}
+
+	var cmds []tea.Cmd
+	switch st.packageType[pkgName] {
+	case "cask":
+		if !st.Brew.CaskDataReady {
+			cmds = append(cmds, m.tabs[0].(*pm.BrewManager).FetchCaskData())
+		}
+	case "formula":
+		if !st.Brew.FormulaeReady {
+			cmds = append(cmds, m.tabs[0].(*pm.BrewManager).FetchFormulae())
+		}
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m Model) lazyFetchCurrentDetail() tea.Cmd {
+	var cmd tea.Cmd
+	if m.allMode {
+		cmd = m.maybeFetchBrewDetailData()
+		if cmd != nil {
+			return cmd
+		}
+		if m.allCursor >= len(m.allDisplayPackages) {
+			return nil
+		}
+		pkgName := m.allDisplayPackages[m.allCursor]
+		origin := m.allPackageOrigin[pkgName]
+		for i, t := range m.tabs {
+			if t.Name() == origin {
+				st := m.states[i]
+				if origin == "npm" && !st.NpmDetailsReady {
+					return pm.FetchAllNpmDetails(st.packages)
+				}
+				if origin == "pip" && !st.PipDetailsReady {
+					return pm.FetchAllPipDetails(st.packages)
+				}
+				break
+			}
+		}
+		return nil
+	}
+
 	st := &m.states[m.activeTab]
 	if st.Brew != nil {
 		m = m.updateBrewInfo()
 	}
+	cmd = m.maybeFetchBrewDetailData()
+	if cmd != nil {
+		return cmd
+	}
+	if m.tabs[m.activeTab].Name() == "npm" && !st.NpmDetailsReady {
+		return pm.FetchAllNpmDetails(st.packages)
+	}
+	if m.tabs[m.activeTab].Name() == "pip" && !st.PipDetailsReady {
+		return pm.FetchAllPipDetails(st.packages)
+	}
 	return nil
+}
+
+func (m Model) selectPackageCmd() tea.Cmd {
+	return m.lazyFetchCurrentDetail()
 }
 
 func (m Model) totalPackages() int {
@@ -234,6 +343,37 @@ func (m Model) totalPackages() int {
 		total += len(m.states[i].displayPackages)
 	}
 	return total
+}
+
+func (m Model) rebuildBrewPackages() Model {
+	st := &m.states[0]
+	if st.Brew == nil {
+		return m
+	}
+	var all []string
+	for _, name := range st.Brew.FormulaNames {
+		all = append(all, name)
+	}
+	for _, name := range st.Brew.CaskNames {
+		all = append(all, name)
+	}
+	for _, name := range st.Brew.Taps {
+		all = append(all, name)
+	}
+	sort.Strings(all)
+	st.packageType = make(map[string]string)
+	for _, name := range st.Brew.FormulaNames {
+		st.packageType[name] = "formula"
+	}
+	for _, name := range st.Brew.CaskNames {
+		st.packageType[name] = "cask"
+	}
+	for _, name := range st.Brew.Taps {
+		st.packageType[name] = "tap"
+	}
+	st.packages = all
+	st.displayPackages = all
+	return m
 }
 
 func (m Model) buildAllPackages() Model {
@@ -276,38 +416,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			st.displayPackages = msg.Packages
 			st.versions = msg.Versions
 			st.loading = false
-			tab := m.tabs[msg.TabIndex]
-			if tab.Name() == "npm" {
-				m = m.buildAllPackages()
-				return m, pm.FetchAllNpmDetails(msg.Packages)
-			}
-			if tab.Name() == "pip" {
-				m = m.buildAllPackages()
-				return m, pm.FetchAllPipDetails(msg.Packages)
-			}
 		}
 		st.progressTarget = 1.0
 		st.progress = 1.0
-		m.updateSparkline()
+		m = m.updateSparkline()
 		m = m.buildAllPackages()
 
 	case pm.BrewListMsg:
 		st := &m.states[0]
 		if st.Brew != nil {
-			st.packages = msg.Names
-			st.displayPackages = msg.Names
+			st.Brew.FormulaNames = msg.Names
 			st.Brew.InstallPaths = msg.Paths
 			st.Brew.InstalledVersions = msg.InstalledVersions
 			st.Brew.Sizes = msg.Sizes
 			st.Brew.BrewListDone = true
-			st.progressTarget = 0.85
-			if st.Brew.BrewFormulaeDone {
+			m = m.rebuildBrewPackages()
+			st.progressTarget = 0.5
+			if st.Brew.CaskListDone && st.Brew.TapListDone {
 				st.loading = false
 				st.progressTarget = 1.0
 				st.progress = 1.0
 				m = m.updateBrewInfo()
 			}
-			m.updateSparkline()
+			m = m.updateSparkline()
 			m = m.buildAllPackages()
 		}
 
@@ -327,12 +458,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			st.Brew.FormulaeMap = map[string]pm.FormulaData(msg)
 			st.Brew.FormulaeReady = true
 			st.Brew.BrewFormulaeDone = true
-			st.progressTarget = 1.0
-			st.progress = 1.0
-			if st.Brew.BrewListDone {
-				st.loading = false
-				m = m.updateBrewInfo()
-			}
+			m = m.updateBrewInfo()
 		}
 
 	case pm.BrewFormulaeErrMsg:
@@ -341,11 +467,93 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			st.Brew.APIErr = error(msg)
 			st.Brew.FormulaeReady = true
 			st.Brew.BrewFormulaeDone = true
-			st.progressTarget = 1.0
-			st.progress = 1.0
-			if st.Brew.BrewListDone {
+		}
+
+	case pm.BrewCaskListMsg:
+		st := &m.states[0]
+		if st.Brew != nil {
+			st.Brew.Casks = msg.InstalledVersions
+			st.Brew.CaskNames = msg.Names
+			st.Brew.CaskPaths = msg.Paths
+			st.Brew.CaskSizes = msg.Sizes
+			st.Brew.CaskListDone = true
+			m = m.rebuildBrewPackages()
+			st.progressTarget = 0.85
+			if st.Brew.BrewListDone && st.Brew.TapListDone {
 				st.loading = false
+				st.progressTarget = 1.0
+				st.progress = 1.0
+				m = m.updateBrewInfo()
 			}
+			m = m.buildAllPackages()
+		}
+
+	case pm.BrewCaskErrMsg:
+		st := &m.states[0]
+		if st.Brew != nil {
+			st.Brew.CaskListDone = true
+			if st.Brew.BrewListDone && st.Brew.TapListDone {
+				st.loading = false
+				st.progressTarget = 1.0
+				st.progress = 1.0
+			}
+		}
+
+	case pm.BrewCaskDataMsg:
+		st := &m.states[0]
+		if st.Brew != nil {
+			st.Brew.CaskData = map[string]*pm.CaskData(msg)
+			st.Brew.CaskDataReady = true
+		}
+
+	case pm.BrewCaskDataErrMsg:
+		st := &m.states[0]
+		if st.Brew != nil {
+			st.Brew.CaskDataReady = true
+		}
+
+	case pm.BrewTapListMsg:
+		st := &m.states[0]
+		if st.Brew != nil {
+			st.Brew.Taps = msg.Names
+			st.Brew.TapListDone = true
+			m = m.rebuildBrewPackages()
+			var fetchCmd tea.Cmd
+			if len(msg.Names) > 0 {
+				fetchCmd = m.tabs[0].(*pm.BrewManager).FetchTapFormulae(msg.Names)
+			}
+			if st.Brew.BrewListDone && st.Brew.CaskListDone {
+				st.loading = false
+				st.progressTarget = 1.0
+				st.progress = 1.0
+				m = m.updateBrewInfo()
+			}
+			m = m.buildAllPackages()
+			return m, fetchCmd
+		}
+
+	case pm.BrewTapErrMsg:
+		st := &m.states[0]
+		if st.Brew != nil {
+			st.Brew.TapListDone = true
+			if st.Brew.BrewListDone && st.Brew.CaskListDone {
+				st.loading = false
+				st.progressTarget = 1.0
+				st.progress = 1.0
+			}
+		}
+
+	case pm.BrewTapFormulaeMsg:
+		st := &m.states[0]
+		if st.Brew != nil {
+			st.Brew.TapFormulae = msg.TapFormulae
+			st.Brew.TapFetched = true
+		}
+
+	case pm.BrewTapFormulaeErrMsg:
+		st := &m.states[0]
+		if st.Brew != nil {
+			st.Brew.TapFetched = true
 		}
 
 	case pm.NpmAllDetailsMsg:
@@ -401,11 +609,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc", "t":
 				m.themeOverlay = false
 				applyTheme(themes[m.themeCursor])
-				return m, nil
+				return m, saveConfigCmd()
 			case "enter":
 				m.themeOverlay = false
 				applyTheme(themes[m.themeCursor])
-				return m, nil
+				return m, saveConfigCmd()
 			case "up":
 				if m.themeCursor > 0 {
 					m.themeCursor--
@@ -515,7 +723,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.allMode = true
 				m.searchActive = false
 				m.searchQuery = ""
-				return m, nil
+				return m, m.selectPackageCmd()
 			}
 
 		case "right":
@@ -542,6 +750,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.allCursor > 0 {
 					m.allCursor--
 				}
+				return m, m.selectPackageCmd()
 			} else {
 				st := &m.states[m.activeTab]
 				if st.cursor > 0 {
@@ -555,6 +764,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.allCursor < len(m.allDisplayPackages)-1 {
 					m.allCursor++
 				}
+				return m, m.selectPackageCmd()
 			} else {
 				st := &m.states[m.activeTab]
 				if st.cursor < len(st.displayPackages)-1 {
@@ -568,7 +778,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) updateSparkline() {
+func (m Model) updateSparkline() Model {
 	total := 0
 	for i := range m.states {
 		total += len(m.states[i].packages)
@@ -577,6 +787,7 @@ func (m Model) updateSparkline() {
 	if len(m.sparklineHistory) > 40 {
 		m.sparklineHistory = m.sparklineHistory[len(m.sparklineHistory)-40:]
 	}
+	return m
 }
 
 func (m Model) renderHeader() string {
@@ -796,11 +1007,21 @@ func (m Model) renderLeftPanel(width int, boxHeight int) string {
 	var listItems []string
 	for i := start; i < end; i++ {
 		pkg := st.displayPackages[i]
+		suffix := ""
+		if st.Brew != nil {
+			switch st.packageType[pkg] {
+			case "cask":
+				suffix = " [c]"
+			case "tap":
+				suffix = " [t]"
+			}
+		}
+		display := pkg + suffix
 		if i == st.cursor {
 			style := SelectedItemStyle.Width(innerWidth)
-			listItems = append(listItems, style.Render(pkg))
+			listItems = append(listItems, style.Render(display))
 		} else {
-			listItems = append(listItems, ItemStyle.Render(pkg))
+			listItems = append(listItems, ItemStyle.Render(display))
 		}
 	}
 
@@ -852,12 +1073,23 @@ func (m Model) renderAllLeftPanel(width int, boxHeight int) string {
 		pkg := m.allDisplayPackages[i]
 		origin := m.allPackageOrigin[pkg]
 
+		suffix := ""
+		if origin == "brew" {
+			switch m.states[0].packageType[pkg] {
+			case "cask":
+				suffix = " [c]"
+			case "tap":
+				suffix = " [t]"
+			}
+		}
+		display := pkg + suffix
+
 		originRendered := pmBadge(origin).Render(origin)
 		var pkgRendered string
 		if i == m.allCursor {
-			pkgRendered = SelectedItemStyle.Render(pkg)
+			pkgRendered = SelectedItemStyle.Render(display)
 		} else {
-			pkgRendered = ItemStyle.Render(pkg)
+			pkgRendered = ItemStyle.Render(display)
 		}
 
 		listItems = append(listItems, originRendered+" "+pkgRendered)
@@ -975,6 +1207,14 @@ func (m Model) renderBrewDetail(width int, st TabState) string {
 	}
 
 	pkgName := st.displayPackages[st.cursor]
+
+	pkgType := st.packageType[pkgName]
+	switch pkgType {
+	case "cask":
+		return m.renderBrewCaskDetail(width, st)
+	case "tap":
+		return m.renderBrewTapDetail(width, st)
+	}
 
 	var contentLines []string
 	contentLines = append(contentLines, "")
@@ -1098,6 +1338,147 @@ func (m Model) renderBrewDetail(width int, st TabState) string {
 
 	contentLines = append(contentLines, "")
 
+	return renderPaneBox(width, "Details", strings.Join(contentLines, "\n"))
+}
+
+func (m Model) renderBrewCaskDetail(width int, st TabState) string {
+	pkgName := st.displayPackages[st.cursor]
+
+	var contentLines []string
+	contentLines = append(contentLines, "")
+	contentLines = append(contentLines, DetailTitleStyle.Render("📦 "+pkgName+" [c]"))
+	contentLines = append(contentLines, "")
+
+	if !st.Brew.CaskDataReady {
+		contentLines = append(contentLines,
+			DetailValueStyle.Render("  Loading cask data..."))
+		contentLines = append(contentLines, "")
+	} else if cask, ok := st.Brew.CaskData[pkgName]; ok {
+		if cask.Desc != "" {
+			contentLines = append(contentLines, renderSection(width, "Description", cask.Desc))
+			contentLines = append(contentLines, "")
+		}
+	}
+
+	type sectionData struct {
+		title string
+		lines []string
+	}
+	var sections []sectionData
+	var allWidths []int
+
+	var pkgPairs [][2]string
+	if ver, ok := st.Brew.Casks[pkgName]; ok {
+		pkgPairs = append(pkgPairs, [2]string{"Installed", ver})
+	}
+	if st.Brew.CaskDataReady {
+		if cask, ok := st.Brew.CaskData[pkgName]; ok && cask.Version != "" {
+			pkgPairs = append(pkgPairs, [2]string{"Latest", cask.Version})
+		}
+	}
+	if path, ok := st.Brew.CaskPaths[pkgName]; ok && path != "" {
+		pkgPairs = append(pkgPairs, [2]string{"Path", path})
+	}
+	if len(pkgPairs) > 0 {
+		maxLabel := 0
+		for _, p := range pkgPairs {
+			w := lipgloss.Width(p[0])
+			if w > maxLabel {
+				maxLabel = w
+			}
+		}
+		var lines []string
+		for _, p := range pkgPairs {
+			label := lipgloss.NewStyle().Width(maxLabel).Bold(true).Foreground(currentTheme.Primary).Render(p[0])
+			value := DetailValueStyle.Render(p[1])
+			line := label + "  " + value
+			allWidths = append(allWidths, lipgloss.Width(line))
+			lines = append(lines, line)
+		}
+		sections = append(sections, sectionData{"Cask", lines})
+	}
+
+	var metaPairs [][2]string
+	if st.Brew.CaskDataReady {
+		if cask, ok := st.Brew.CaskData[pkgName]; ok {
+			if cask.Homepage != "" {
+				metaPairs = append(metaPairs, [2]string{"Homepage", cask.Homepage})
+			}
+			if len(cask.Name) > 0 {
+				metaPairs = append(metaPairs, [2]string{"App Name", cask.Name[0]})
+			}
+		}
+	}
+	if st.Brew.CaskSizes != nil {
+		if size, ok := st.Brew.CaskSizes[pkgName]; ok && size > 0 {
+			metaPairs = append(metaPairs, [2]string{"Size", humanSize(size)})
+		}
+	}
+	if len(metaPairs) > 0 {
+		maxLabel := 0
+		for _, p := range metaPairs {
+			w := lipgloss.Width(p[0])
+			if w > maxLabel {
+				maxLabel = w
+			}
+		}
+		var lines []string
+		for _, p := range metaPairs {
+			label := lipgloss.NewStyle().Width(maxLabel).Bold(true).Foreground(currentTheme.Primary).Render(p[0])
+			var value string
+			if p[0] == "Homepage" {
+				value = LinkStyle.Render(p[1])
+			} else {
+				value = DetailValueStyle.Render(p[1])
+			}
+			line := label + "  " + value
+			allWidths = append(allWidths, lipgloss.Width(line))
+			lines = append(lines, line)
+		}
+		sections = append(sections, sectionData{"Metadata", lines})
+	}
+
+	sectionWidth := width
+	if len(allWidths) > 0 {
+		maxW := 0
+		for _, w := range allWidths {
+			if w > maxW {
+				maxW = w
+			}
+		}
+		sectionWidth = min(width, max(maxW+4, 6))
+	}
+
+	for _, s := range sections {
+		contentLines = append(contentLines, renderSection(sectionWidth, s.title, s.lines...))
+	}
+
+	contentLines = append(contentLines, "")
+	return renderPaneBox(width, "Details", strings.Join(contentLines, "\n"))
+}
+
+func (m Model) renderBrewTapDetail(width int, st TabState) string {
+	pkgName := st.displayPackages[st.cursor]
+
+	var contentLines []string
+	contentLines = append(contentLines, "")
+	contentLines = append(contentLines, DetailTitleStyle.Render("🔗 "+pkgName+" [t]"))
+	contentLines = append(contentLines, "")
+
+	if !st.Brew.TapFetched {
+		contentLines = append(contentLines,
+			DetailValueStyle.Render("  Loading tap formulae..."))
+	} else {
+		formulae := st.Brew.TapFormulae[pkgName]
+		if len(formulae) > 0 {
+			contentLines = append(contentLines, renderSection(width, "Tap Formulae", formulae...))
+		} else {
+			contentLines = append(contentLines,
+				DetailValueStyle.Render("  No formulae found for this tap"))
+		}
+	}
+
+	contentLines = append(contentLines, "")
 	return renderPaneBox(width, "Details", strings.Join(contentLines, "\n"))
 }
 
@@ -1226,7 +1607,15 @@ func (m Model) renderPipDetail(width int, st TabState) string {
 	} else if info, ok := st.PipDetails[pkgName]; ok {
 
 		if info.Summary != "" {
-			contentLines = append(contentLines, renderSection(width, "Description", info.Summary))
+			desc := info.Summary
+			if idx := strings.Index(desc, "\n"); idx >= 0 {
+				desc = desc[:idx]
+			}
+			maxDesc := max(20, width-8)
+			if len(desc) > maxDesc {
+				desc = desc[:maxDesc] + "..."
+			}
+			contentLines = append(contentLines, renderSection(width, "Description", desc))
 			contentLines = append(contentLines, "")
 		}
 
@@ -1437,12 +1826,22 @@ func (m Model) listViewFallback() string {
 		for i := start; i < end; i++ {
 			pkg := m.allDisplayPackages[i]
 			origin := m.allPackageOrigin[pkg]
+			suffix := ""
+			if origin == "brew" {
+				switch m.states[0].packageType[pkg] {
+				case "cask":
+					suffix = " [c]"
+				case "tap":
+					suffix = " [t]"
+				}
+			}
+			display := pkg + suffix
 			originRendered := pmBadgeFn(origin).Render(origin)
 			var pkgRendered string
 			if i == m.allCursor {
-				pkgRendered = SelectedItemStyle.Render(pkg)
+				pkgRendered = SelectedItemStyle.Render(display)
 			} else {
-				pkgRendered = ItemStyle.Render(pkg)
+				pkgRendered = ItemStyle.Render(display)
 			}
 			list += originRendered + " " + pkgRendered + "\n"
 		}
@@ -1459,10 +1858,20 @@ func (m Model) listViewFallback() string {
 		}
 		for i := start; i < end; i++ {
 			pkg := st.displayPackages[i]
+			suffix := ""
+			if st.Brew != nil {
+				switch st.packageType[pkg] {
+				case "cask":
+					suffix = " [c]"
+				case "tap":
+					suffix = " [t]"
+				}
+			}
+			display := pkg + suffix
 			if i == st.cursor {
-				list += SelectedItemStyle.Render(pkg) + "\n"
+				list += SelectedItemStyle.Render(display) + "\n"
 			} else {
-				list += ItemStyle.Render(pkg) + "\n"
+				list += ItemStyle.Render(display) + "\n"
 			}
 		}
 	}

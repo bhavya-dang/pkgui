@@ -6,8 +6,11 @@ before:
 
 builds:
   - binary: pkgui
+    dir: ./cmd/pkgui
     env:
       - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
     goos:
       - darwin
       - linux
@@ -31,4 +34,16 @@ changelog:
   filters:
     exclude:
       - "^docs:"
-      - "^test:"
+      - "^chore:"
+
+brews:
+  - repository:
+      owner: bhavya-dang
+      name: homebrew-pkgui
+      token: "{{ .Env.GH_PAT }}"
+    directory: Formula
+    homepage: "https://github.com/bhavya-dang/pkgui"
+    description: "terminal dashboard for everything you've installed"
+    license: "MIT"
+    dependencies:
+      - name: git
